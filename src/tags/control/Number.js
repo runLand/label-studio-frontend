@@ -21,16 +21,16 @@ import ControlBase from "./Base";
  * </View>
  *
  * @name Number
- * @param {string} name                       - Name of the element
- * @param {string} toName                     - Name of the element that you want to label
- * @param {number} [min]                      - Minimum number value
- * @param {number} [max]                      - Maximum number value
- * @param {number} [step=1]                   - Step for value increment/decrement
- * @param {number} [defaultValue]             - Default number value
- * @param {string} hotkey                     - HotKey for increasing number value
- * @param {boolean} [required=false]          - Whether number validation is required
- * @param {string} [requiredMessage]          - Message to show if validation fails
- * @param {boolean} [perRegion]               - Use this tag to label regions instead of the whole object
+ * @param {string} name              - Name of the element
+ * @param {string} toName            - Name of the element that you want to label
+ * @param {number} [min]             - Minimum number value
+ * @param {number} [max]             - Maximum number value
+ * @param {number} [step=1]          - Step for value increment/decrement
+ * @param {number} [defaultValue]    - Default number value
+ * @param {string} hotkey            - HotKey for increasing number value
+ * @param {boolean} [required=false] - Whether number is required or not
+ * @param {string} [requiredMessage] - Message to show if validation fails
+ * @param {boolean} [perRegion]      - Use this tag to label regions instead of the whole object
  */
 const TagAttrs = types.model({
   name: types.identifier,
