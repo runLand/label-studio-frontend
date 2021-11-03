@@ -18,6 +18,7 @@ const initLabelStudio = async ({ config, data, annotations = [{ result: [] }], p
     "submit",
     "controls",
     "side-column",
+    "topbar",
     "annotations:history",
     "annotations:current",
     "annotations:tabs",
@@ -26,6 +27,7 @@ const initLabelStudio = async ({ config, data, annotations = [{ result: [] }], p
     "annotations:delete",
     "predictions:tabs",
     "predictions:menu",
+    "edit-history",
   ];
   const task = { data, annotations, predictions };
 
@@ -82,7 +84,7 @@ const convertToFixed = data => {
   if (typeof data === "object") {
     const result = {};
 
-    for (let key in data) {
+    for (const key in data) {
       result[key] = convertToFixed(data[key]);
     }
     return result;
@@ -104,7 +106,7 @@ const convertToFixed = data => {
  * @param {number} height
  */
 const getSizeConvertor = (width, height) =>
-  function convert (data, size = width) {
+  function convert(data, size = width) {
     if (typeof data === "number") return convertToFixed((data * 100) / size);
     if (Array.isArray(data)) {
       if (data.length === 2) return [convert(data[0]), convert(data[1], height)];
@@ -113,7 +115,7 @@ const getSizeConvertor = (width, height) =>
     if (typeof data === "object") {
       const result = {};
 
-      for (let key in data) {
+      for (const key in data) {
         if (key === "rotation") result[key] = data[key];
         else if (key.startsWith("height") || key === "y" || key.endsWith("Y")) result[key] = convert(data[key], height);
         else result[key] = convert(data[key]);
@@ -165,7 +167,7 @@ const clickMultipleKonva = async (points, done) => {
   const delay = (timeout = 0) => new Promise(resolve => setTimeout(resolve, timeout));
   let lastPoint;
 
-  for (let point of points) {
+  for (const point of points) {
     if (lastPoint) {
       stage.fire("mousemove", { evt: { offsetX: point[0], offsetY: point[1], timeStamp: Date.now() } });
       await delay();
@@ -191,7 +193,7 @@ const polygonKonva = async (points, done) => {
     const delay = (timeout = 0) => new Promise(resolve => setTimeout(resolve, timeout));
     const stage = window.Konva.stages[0];
 
-    for (let point of points) {
+    for (const point of points) {
       stage.fire("click", {
         evt: { offsetX: point[0], offsetY: point[1], timeStamp: Date.now(), preventDefault: () => {} },
       });
@@ -263,7 +265,7 @@ const hasKonvaPixelColorAtPoint = (x, y, rgbArray, tolerance, done) => {
     return true;
   };
 
-  for (let layer of stage.getLayers()) {
+  for (const layer of stage.getLayers()) {
     const rgba = layer.getContext().getImageData(x, y, 1, 1).data;
 
     if (!areEqualRGB(rgbArray, rgba)) continue;
@@ -286,9 +288,9 @@ const areEqualRGB = (a, b, tolerance) => {
 
 const getKonvaPixelColorFromPoint = (x, y, done) => {
   const stage = window.Konva.stages[0];
-  let colors = [];
+  const colors = [];
 
-  for (let layer of stage.getLayers()) {
+  for (const layer of stage.getLayers()) {
     const context = layer.getContext();
     const ratio = context.canvas.pixelRatio;
     const rgba = context.getImageData(x * ratio, y * ratio, 1, 1).data;
@@ -302,19 +304,28 @@ const getKonvaPixelColorFromPoint = (x, y, done) => {
 const getCanvasSize = done => {
   const stage = window.Konva.stages[0];
 
-  done({ width: stage.width(), height: stage.height() });
+  done({
+    width: stage.width(),
+    height: stage.height(),
+  });
 };
 const getImageSize = done => {
   const image = window.document.querySelector('img[alt="LS"]');
   const clientRect = image.getBoundingClientRect();
 
-  done({ width: clientRect.width, height: clientRect.height });
+  done({
+    width: clientRect.width,
+    height: clientRect.height,
+  });
 };
 const getImageFrameSize = done => {
   const image = window.document.querySelector('img[alt="LS"]').parentElement;
   const clientRect = image.getBoundingClientRect();
 
-  done({ width: clientRect.width, height: clientRect.height });
+  done({
+    width: Math.round(clientRect.width),
+    height: Math.round(clientRect.height),
+  });
 };
 const setZoom = (scale, x, y, done) => {
   Htx.annotationStore.selected.objects.find(o => o.type === "image").setZoom(scale, x, y);
@@ -330,10 +341,12 @@ const setZoom = (scale, x, y, done) => {
  */
 const countKonvaShapes = async done => {
   const stage = window.Konva.stages[0];
-  const count = stage.find(node => {
-    return node.getType() === "Shape" && node.isVisible();
-  }).length;
+  const regions = Htx.annotationStore.selected.regionStore.regions;
+  let count = 0;
 
+  regions.forEach(region => {
+    count +=  stage.find("."+region.id).filter(node => node.isVisible()).length;
+  });
   done(count);
 };
 
@@ -406,9 +419,9 @@ const whereIsPixel = (rgbArray, tolerance, done) => {
     }
     return true;
   };
-  let points = [];
+  const points = [];
 
-  for (let layer of stage.getLayers()) {
+  for (const layer of stage.getLayers()) {
     const canvas = layer.getCanvas();
 
     for (let x = 0; x < canvas.width; x++) {
@@ -424,13 +437,17 @@ const whereIsPixel = (rgbArray, tolerance, done) => {
   done(points);
 };
 
-function _isObject (value) {
-  var type = typeof value;
+const dumpJSON = (obj) => {
+  console.log(JSON.stringify(obj, null, '  '));
+};
+
+function _isObject(value) {
+  const type = typeof value;
 
   return value !== null && (type === "object" || type === "function");
 }
 
-function _pickBy (obj, predicate, path = []) {
+function _pickBy(obj, predicate, path = []) {
   if (!_isObject(obj) || Array.isArray(obj)) return obj;
   return Object.keys(obj).reduce((res, key) => {
     const val = obj[key];
@@ -443,17 +460,17 @@ function _pickBy (obj, predicate, path = []) {
   }, {});
 }
 
-function _not (predicate) {
+function _not(predicate) {
   return (...args) => {
     return !predicate(...args);
   };
 }
 
-function omitBy (object, predicate) {
+function omitBy(object, predicate) {
   return _pickBy(object, _not(predicate));
 }
 
-function hasSelectedRegion (done) {
+function hasSelectedRegion(done) {
   done(!!Htx.annotationStore.selected.highlightedNode);
 }
 
@@ -488,4 +505,5 @@ module.exports = {
   selectText,
 
   omitBy,
+  dumpJSON,
 };

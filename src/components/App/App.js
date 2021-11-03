@@ -14,6 +14,7 @@ import Tree from "../../core/Tree";
 /**
  * Components
  */
+import { TopBar } from "../TopBar/TopBar";
 import Debug from "../Debug";
 import Segment from "../Segment/Segment";
 import Settings from "../Settings/Settings";
@@ -33,11 +34,13 @@ import styles from "./App.module.scss";
 import { TreeValidation } from "../TreeValidation/TreeValidation";
 import { guidGenerator } from "../../utils/unique";
 import Grid from "./Grid";
-import { AnnotationTabs } from "../AnnotationTabs/AnnotationTabs";
 import { SidebarPage, SidebarTabs } from "../SidebarTabs/SidebarTabs";
 import { AnnotationTab } from "../AnnotationTab/AnnotationTab";
 import { Block, Elem } from "../../utils/bem";
 import './App.styl';
+import { Space } from "../../common/Space/Space";
+import { DynamicPreannotationsControl } from "../AnnotationTab/DynamicPreannotationsControl";
+import { isDefined } from "../../utils/utilities";
 
 /**
  * App
@@ -107,16 +110,27 @@ class App extends Component {
               {Tree.renderItem(root)}
               {this.renderRelations(as.selected)}
             </Elem>
-            {getRoot(as).hasInterface('infobar') && (
-              <Elem name="infobar">
-                Task #{getRoot(as).task.id}
-              </Elem>
+            {getRoot(as).hasInterface('infobar') && this._renderInfobar(as)}
+            {as.selected.onlyTextObjects === false && (
+              <DynamicPreannotationsControl />
             )}
           </Block>
         )}
         {as.viewingAllAnnotations && this.renderAllAnnotations()}
         {as.viewingAllPredictions && this.renderAllPredictions()}
       </>
+    );
+  }
+
+  _renderInfobar(as) {
+    const { id, queue } = getRoot(as).task;
+
+    return (
+      <Elem name="infobar" tag={Space} size="small">
+        <span>Task #{id}</span>
+
+        {queue && <span>{queue}</span>}
+      </Elem>
     );
   }
 
@@ -184,15 +198,9 @@ class App extends Component {
             </Segment>
           )}
 
+          {isDefined(store) && store.hasInterface('topbar') && <TopBar store={store}/>}
           <div className={stCommon}>
             <div className={mainContainerClass.join(" ")}>
-              <AnnotationTabs
-                store={store}
-                showAnnotations={store.hasInterface("annotations:tabs")}
-                showPredictions={store.hasInterface("predictions:tabs")}
-                allowCreateNew={store.hasInterface("annotations:add-new")}
-                allowViewAll={store.hasInterface('annotations:view-all')}
-              />
               {as.validation === null
                 ? this._renderUI(as.selectedHistory?.root ?? root, as)
                 : this.renderConfigValidationException(store)}
@@ -202,7 +210,7 @@ class App extends Component {
                 {store.hasInterface("side-column") && (
                   <SidebarTabs active="annotation">
                     <SidebarPage name="annotation" title="Annotation">
-                      <AnnotationTab store={store} />
+                      <AnnotationTab store={store}/>
                     </SidebarPage>
                     {this.props.panels.map(({ name, title, Component }) => (
                       <SidebarPage key={name} name={name} title={title}>

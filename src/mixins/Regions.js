@@ -1,4 +1,4 @@
-import { types, getParent, getRoot } from "mobx-state-tree";
+import { getEnv, getParent, getRoot, getType, types } from "mobx-state-tree";
 import { guidGenerator } from "../core/Helpers";
 import { AnnotationMixin } from "./AnnotationMixin";
 
@@ -13,12 +13,25 @@ const RegionsMixin = types
     hidden: types.optional(types.boolean, false),
 
     parentID: types.optional(types.string, ""),
+
+    fromSuggestion: false,
+
+    // Dynamic preannotations enabled
+    dynamic: false,
+
+    origin: types.optional(types.enumeration([
+      'prediction',
+      'prediction-changed',
+      'manual',
+    ]), 'manual'),
   })
   .volatile(() => ({
     // selected: false,
-    highlighted: false,
+    _highlighted: false,
     isDrawing: false,
     perRegionFocusRequest: null,
+    shapeRef: null,
+    drawingTimeout: null,
   }))
   .views(self => ({
     get perRegionStates() {
@@ -43,6 +56,14 @@ const RegionsMixin = types
       return !self.isDrawing;
     },
 
+    get highlighted() {
+      return self._highlighted;
+    },
+
+    get inSelection() {
+      return self.annotation?.regionStore.isSelected(self);
+    },
+
   }))
   .actions(self => {
     return {
@@ -52,6 +73,16 @@ const RegionsMixin = types
 
       setDrawing(val) {
         self.isDrawing = val;
+
+        self.notifyDrawingFinished();
+      },
+
+      setShapeRef(ref) {
+        self.shapeRef = ref;
+      },
+
+      beforeDestroy() {
+        self.notifyDrawingFinished({ destroy: true });
       },
 
       // All of the below accept size as an argument
@@ -202,7 +233,7 @@ const RegionsMixin = types
 
       afterUnselectRegion() {},
 
-      onClickRegion() {
+      onClickRegion(ev) {
         const annotation = self.annotation;
 
         if (!annotation.editable || self.isDrawing) return;
@@ -212,18 +243,24 @@ const RegionsMixin = types
           annotation.stopRelationMode();
           annotation.regionStore.unselectAll();
         } else {
-          self._selectArea();
+          self._selectArea(ev?.ctrlKey || ev?.metaKey);
         }
       },
 
-      _selectArea() {
+      _selectArea(additiveMode = false) {
         this.cancelPerRegionFocus();
         const annotation = self.annotation;
-        const wasNotSelected = !self.selected;
 
-        annotation.unselectAll();
-        if (wasNotSelected) {
-          annotation.selectArea(self);
+        if (additiveMode) {
+          annotation.toggleRegionSelection(self);
+        } else {const wasNotSelected = !self.selected;
+
+
+          if (wasNotSelected) {
+            annotation.selectArea(self);
+          } else {
+            annotation.unselectAll();
+          }
         }
       },
 
@@ -236,17 +273,45 @@ const RegionsMixin = types
       },
 
       setHighlight(val) {
-        self.highlighted = val;
+        self._highlighted = val;
       },
 
       toggleHighlight() {
-        self.setHighlight(!self.highlighted);
+        self.setHighlight(!self._highlighted);
       },
 
       toggleHidden(e) {
         self.hidden = !self.hidden;
         e && e.stopPropagation();
       },
-    };});
+
+      notifyDrawingFinished({ destroy = false } = {}) {
+        if (self.origin === 'prediction') {
+          self.origin = 'prediction-changed';
+        }
+
+        // everything above is related to dynamic preannotations
+        if (!self.dynamic || self.fromSuggestion) return;
+
+        const { regions } = getRoot(self).annotationStore.selected;
+
+        const connectedRegions = regions.filter(r => {
+          if (destroy && r === self) return false;
+          return r.dynamic && r.type === self.type && r.labelName === self.labelName;
+        });
+
+        clearTimeout(self.drawingTimeout);
+
+        if (self.isDrawing === false) {
+          const timeout = getType(self).name.match(/brush/i) ? 1200 : 0;
+          const env = getEnv(self);
+
+          self.drawingTimeout = setTimeout(() => {
+            env.events.invoke("regionFinishedDrawing", self, connectedRegions);
+          }, timeout);
+        }
+      },
+    };
+  });
 
 export default types.compose(RegionsMixin, AnnotationMixin);

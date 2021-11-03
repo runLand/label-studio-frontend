@@ -1,30 +1,34 @@
 import { types } from "mobx-state-tree";
 
-import * as Tools from "../../tools";
 import Registry from "../../core/Registry";
 import ControlBase from "./Base";
 import { customTypes } from "../../core/CustomTypes";
 import { AnnotationMixin } from "../../mixins/AnnotationMixin";
 import SeparatedControlMixin from "../../mixins/SeparatedControlMixin";
+import { ToolManagerMixin } from "../../mixins/ToolManagerMixin";
 
 /**
- * Rectangle is used to add rectangle (Bounding Box) to an image without label selection. It's useful when you have
- * only one label.
+ * Use the Rectangle tag to add a rectangle (Bounding Box) to an image without selecting a label. This can be useful when you have only one label to assign to a rectangle.
+ *
+ * Use with the following data types: image
  * @example
+ * <!--Basic labeling configuration for adding rectangular bounding box regions to an image -->
  * <View>
  *   <Rectangle name="rect-1" toName="img-1" />
  *   <Image name="img-1" value="$img" />
  * </View>
  * @name Rectangle
- * @meta_title Rectangle Tags for Adding Rectangle Bounding Box to Images
- * @meta_description Label Studio Rectangle Tags customize Label Studio for adding rectangle bounding boxes to images for machine learning and data science projects.
+ * @meta_title Rectangle Tag for Adding Rectangle Bounding Box to Images
+ * @meta_description Customize Label Studio with the Rectangle tag to add rectangle bounding boxes to images for machine learning and data science projects.
  * @param {string} name                   - Name of the element
  * @param {string} toName                 - Name of the image to label
  * @param {float=} [opacity=0.6]          - Opacity of rectangle
- * @param {string=} [fillColor]           - Rectangle fill color
- * @param {string=} [strokeColor=#f48a42] - Stroke color
+ * @param {string=} [fillColor]           - Rectangle fill color in hexadecimal
+ * @param {string=} [strokeColor=#f48a42] - Stroke color in hexadecimal
  * @param {number=} [strokeWidth=1]       - Width of the stroke
- * @param {boolean=} [canRotate=true]     - Show or hide rotation control
+ * @param {boolean=} [canRotate=true]     - Whether to show or hide rotation control
+ * @param {boolean} [smart]               - Show smart tool for interactive pre-annotations
+ * @param {boolean} [smartOnly]           - Only show smart tool for interactive pre-annotations
  */
 const TagAttrs = types.model({
   name: types.identifier,
@@ -44,19 +48,18 @@ const Model = types
   .model({
     type: "rectangle",
   })
-  .actions(self => ({
-    fromStateJSON() {},
-
-    afterCreate() {
-      const rect = Tools.Rect.create({ activeShape: null });
-
-      rect._control = self;
-
-      self.tools = { rect };
-    },
+  .volatile(() => ({
+    toolNames: ['Rect'],
   }));
 
-const RectangleModel = types.compose("RectangleModel", ControlBase, AnnotationMixin, SeparatedControlMixin, TagAttrs, Model);
+const RectangleModel = types.compose("RectangleModel",
+  ControlBase,
+  AnnotationMixin,
+  SeparatedControlMixin,
+  TagAttrs,
+  Model,
+  ToolManagerMixin,
+);
 
 const HtxView = () => {
   return null;

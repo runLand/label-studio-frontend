@@ -6,14 +6,19 @@ export const AnnotationMixin = types.model("AnnotationMixin", {
   get annotation() {
     const as = self.annotationStore;
 
-    return as.selectedHistory ?? as.selected;
+    return as?.selectedHistory ?? as?.selected;
   },
 
   get annotationStore() {
     const root = getRoot(self);
 
     if (root === self) {
-      return getRoot(self.control).annotationStore;
+      if (self.control) {
+        return getRoot(self.control).annotationStore;
+      } else if (self.obj) {
+        return getRoot(self.obj).annotationStore;
+      }
+      return null;
     }
 
     return root.annotationStore;

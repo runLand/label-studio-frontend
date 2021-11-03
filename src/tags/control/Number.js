@@ -1,5 +1,5 @@
 import React from "react";
-import { observer, inject } from "mobx-react";
+import { inject, observer } from "mobx-react";
 import { types } from "mobx-state-tree";
 
 import InfoModal from "../../components/Infomodal/Infomodal";
@@ -12,25 +12,30 @@ import { isDefined } from "../../utils/utilities";
 import ControlBase from "./Base";
 
 /**
- * Number adds numeric classification
+ * The Number tag supports numeric classification. Use to classify tasks using numbers.
+ *
+ * Use with the following data types: audio, image, HTML, paragraphs, text, time series, video
  *
  * @example
+ * <!--Basic labeling configuration for numeric classification of text -->
  * <View>
  *   <Text name="txt" value="$text" />
  *   <Number name="number" toName="txt" max="10" />
  * </View>
  *
  * @name Number
- * @param {string} name              - Name of the element
- * @param {string} toName            - Name of the element that you want to label
- * @param {number} [min]             - Minimum number value
- * @param {number} [max]             - Maximum number value
- * @param {number} [step=1]          - Step for value increment/decrement
- * @param {number} [defaultValue]    - Default number value
- * @param {string} hotkey            - HotKey for increasing number value
- * @param {boolean} [required=false] - Whether number is required or not
- * @param {string} [requiredMessage] - Message to show if validation fails
- * @param {boolean} [perRegion]      - Use this tag to label regions instead of the whole object
+ * @meta_title Number Tag to Numerically Classify
+ * @meta_description Customize Label Studio with the Number tag to numerically classify tasks in your machine learning and data science projects.
+ * @param {string} name                       - Name of the element
+ * @param {string} toName                     - Name of the element that you want to label
+ * @param {number} [min]                      - Minimum number value
+ * @param {number} [max]                      - Maximum number value
+ * @param {number} [step=1]                   - Step for value increment/decrement
+ * @param {number} [defaultValue]             - Default number value
+ * @param {string} hotkey                     - Hotkey for increasing number value
+ * @param {boolean} [required=false]          - Whether to require number validation
+ * @param {string} [requiredMessage]          - Message to show if validation fails
+ * @param {boolean} [perRegion]               - Use this tag to classify specific regions instead of the whole object
  */
 const TagAttrs = types.model({
   name: types.identifier,

@@ -31,6 +31,7 @@ const createRegion = (from_name, type, values) => ({
   from_name,
   to_name: "img",
   type,
+  origin: "manual",
   value: {
     height: 10.458911419423693,
     rotation: 0,
@@ -57,7 +58,7 @@ const annotationWithPerRegion = {
 const image =
   "https://htx-misc.s3.amazonaws.com/opensource/label-studio/examples/images/nick-owuor-astro-nic-visuals-wDifg5xc9Z4-unsplash.jpg";
 
-Scenario("Check Rect region for Image", async function ({ I, AtImageView, AtSidebar }) {
+Scenario("Check Rect region for Image", async function({ I, AtImageView, AtSidebar }) {
   const params = {
     config,
     data: { image },
@@ -71,7 +72,7 @@ Scenario("Check Rect region for Image", async function ({ I, AtImageView, AtSide
   I.executeAsyncScript(waitForImage);
   AtSidebar.seeRegions(1);
   // select first and only region
-  I.click(locate('[aria-label="block"]'));
+  I.click(locate('[aria-label="region"]'));
   I.see("Labels:");
 
   // click on region's rect on the canvas
@@ -79,7 +80,7 @@ Scenario("Check Rect region for Image", async function ({ I, AtImageView, AtSide
   I.dontSee("Labels:");
 });
 
-Scenario("Image with perRegion tags", async function ({ I, AtImageView, AtSidebar }) {
+Scenario("Image with perRegion tags", async function({ I, AtImageView, AtSidebar }) {
   let result;
   const params = {
     config: perRegionConfig,
@@ -94,7 +95,7 @@ Scenario("Image with perRegion tags", async function ({ I, AtImageView, AtSideba
   I.executeAsyncScript(waitForImage);
   AtSidebar.seeRegions(1);
   // select first and only region
-  I.click(locate('[aria-label="block"]'));
+  I.click(locate('[aria-label="region"]'));
   I.see("Labels:");
 
   // check that there is deserialized text for this region; and without doubles

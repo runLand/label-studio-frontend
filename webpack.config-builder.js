@@ -191,7 +191,6 @@ const devServer = () => {
   return (process.env.NODE_ENV === 'development' && !BUILD.NO_SERVER) ? {
     devServer: {
       compress: true,
-      hot: true,
       port: 3000,
       static: {
         directory: path.join(__dirname, "public")
@@ -199,6 +198,9 @@ const devServer = () => {
       historyApiFallback: {
         index: "./public/index.html",
       },
+      client: {
+        overlay: false,
+      }
     }
   } : {};
 };
@@ -220,7 +222,7 @@ const plugins = [
 
 if (isDevelopment) {
   plugins.push(new ESLintPlugin({
-    fix: true,
+    fix: false,
     failOnError: true,
   }));
 }
@@ -270,10 +272,6 @@ module.exports = ({withDevServer = true} = {}) => ({
   },
   resolve: {
     extensions: [".tsx", ".ts", ".js"],
-    fallback: {
-      stream: require.resolve("stream-browserify"),
-      timers: require.resolve("timers-browserify"),
-    },
   },
   plugins: withDevServer ? [
     ...plugins,
@@ -381,6 +379,14 @@ module.exports = ({withDevServer = true} = {}) => ({
               ref: true,
             },
           },
+          "url-loader"
+        ],
+      },
+      {
+        test: /\.png$/,
+        exclude: /node_modules/,
+        use: [
+          "url-loader"
         ],
       },
       {

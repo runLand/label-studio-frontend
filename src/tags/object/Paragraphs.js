@@ -1,6 +1,6 @@
 import React, { Component } from "react";
-import { observer, inject } from "mobx-react";
-import { types, getRoot } from "mobx-state-tree";
+import { inject, observer } from "mobx-react";
+import { getRoot, types } from "mobx-state-tree";
 import ColorScheme from "pleasejs";
 import { Button } from "antd";
 import { PauseCircleOutlined, PlayCircleOutlined } from "@ant-design/icons";
@@ -12,37 +12,43 @@ import Registry from "../../core/Registry";
 import Utils from "../../utils";
 import { ParagraphsRegionModel } from "../../regions/ParagraphsRegion";
 import { restoreNewsnapshot } from "../../core/Helpers";
-import { splitBoundaries, findNodeAt } from "../../utils/html";
+import { findNodeAt, matchesSelector, splitBoundaries } from "../../utils/html";
 import { parseValue } from "../../utils/data";
 import messages from "../../utils/messages";
 import styles from "./Paragraphs/Paragraphs.module.scss";
 import { errorBuilder } from "../../core/DataValidator/ConfigValidator";
 import { AnnotationMixin } from "../../mixins/AnnotationMixin";
+import { isSelectionContainsSpan } from "../../utils/selection-tools";
+import { isValidObjectURL } from "../../utils/utilities";
 
 /**
- * Paragraphs tag shows paragraph markup that can be labeled.
- * it expects an array of objects like this: [{ $nameKey: "Author name", $textKey: "Text" }, ... ]
+ * The Paragraphs tag displays paragraphs of text on the labeling interface. Use to label dialogue transcripts for NLP and NER projects.
+ * The Paragraphs tag expects task data formatted as an array of objects like the following:
+ * [{ $nameKey: "Author name", $textKey: "Text" }, ... ]
+ *
+ * Use with the following data types: text
  * @example
+ * <!--Labeling configuration to label paragraph regions of text containing dialogue-->
  * <View>
  *   <Paragraphs name="dialogue-1" value="$dialogue" layout="dialogue" />
  *   <ParagraphLabels name="importance" toName="dialogue-1">
- *     <Label value="Important Stuff"></Label>
+ *     <Label value="Important content"></Label>
  *     <Label value="Random talk"></Label>
  *   </ParagraphLabels>
  * </View>
  * @name Paragraphs
  * @regions ParagraphsRegion
  * @meta_title Paragraph Tags for Paragraphs
- * @meta_description Label Studio Paragraph Tags customize Label Studio for paragraphs for machine learning and data science projects.
+ * @meta_description Customize Label Studio with the Paragraphs tag to annotate paragraphs for NLP and NER machine learning and data science projects.
  * @param {string} name                  - Name of the element
- * @param {string} value                 - Value of the element
- * @param {json|url} [valueType=json]    - Where the data is stored — directly in uploaded JSON data or needs to be loaded from a URL
+ * @param {string} value                 - Data field containing the paragraph content
+ * @param {json|url} [valueType=json]    - Whether the data is stored directly in uploaded JSON data or needs to be loaded from a URL
  * @param {string} audioUrl              - Audio to sync phrases with
  * @param {boolean} [showPlayer=false]   - Whether to show audio player above the paragraphs
- * @param {no|yes} [saveTextResult=yes]  - Whether to save `text` to `value` or not
- * @param {none|dialogue} [layout=none]  - The styles layout to use
- * @param {string} [nameKey=author]      - The name key to use
- * @param {string} [textKey=text]        - The text key to use
+ * @param {no|yes} [saveTextResult=yes]  - Whether to store labeled text along with the results. By default, doesn't store text for `valueType=url`
+ * @param {none|dialogue} [layout=none]  - Whether to use a dialogue-style layout or not
+ * @param {string} [nameKey=author]      - The key field to use for name
+ * @param {string} [textKey=text]        - The key field to use for the text
  */
 const TagAttrs = types.model("ParagraphsModel", {
   name: types.identifier,
@@ -209,7 +215,7 @@ const Model = types
       if (self.valuetype === "url") {
         const url = value;
 
-        if (!/^https?:\/\//.test(url)) {
+        if (!isValidObjectURL(url, true)) {
           const message = [];
 
           if (url) {
@@ -241,7 +247,7 @@ const Model = types
     },
 
     setRemoteValue(val) {
-      let errors = [];
+      const errors = [];
 
       if (!Array.isArray(val)) {
         errors.push(`Provided data is not an array`);
@@ -293,6 +299,8 @@ const Model = types
       const labels = { [control.valueType]: control.selectedValues() };
       const area = self.annotation.createResult(range, labels, control, self);
 
+      area.notifyDrawingFinished();
+
       area._range = range._range;
       return area;
     },
@@ -341,6 +349,8 @@ const Model = types
 const ParagraphsModel = types.compose("ParagraphsModel", RegionsMixin, TagAttrs, Model, ObjectBase, AnnotationMixin);
 
 class HtxParagraphsView extends Component {
+  _regionSpanSelector = ".htx-highlight";
+
   constructor(props) {
     super(props);
     this.myRef = React.createRef();
@@ -359,7 +369,7 @@ class HtxParagraphsView extends Component {
 
   getOffsetInPhraseElement(container, offset) {
     const node = this.getPhraseElement(container);
-    let range = document.createRange();
+    const range = document.createRange();
 
     range.setStart(node, 0);
     range.setEnd(container, offset);
@@ -378,9 +388,10 @@ class HtxParagraphsView extends Component {
       el.style.visibility = "hidden";
     });
 
-    var i,
-      ranges = [],
-      selection = window.getSelection();
+    let i;
+
+    const ranges = [];
+    const selection = window.getSelection();
 
     if (selection.isCollapsed) {
       names.forEach(el => {
@@ -390,7 +401,7 @@ class HtxParagraphsView extends Component {
     }
 
     for (i = 0; i < selection.rangeCount; i++) {
-      var r = selection.getRangeAt(i);
+      const r = selection.getRangeAt(i);
 
       if (r.endContainer.nodeName === "DIV") {
         r.setEnd(r.startContainer, r.startContainer.length);
@@ -430,12 +441,48 @@ class HtxParagraphsView extends Component {
     return ranges;
   }
 
-  onMouseUp() {
+  _selectRegions = (additionalMode) => {
+    const { item } = this.props;
+    const root = this.myRef.current;
+    const selection = window.getSelection();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    const regions = [];
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+
+      if (node.nodeName === "SPAN" && node.matches(this._regionSpanSelector) && isSelectionContainsSpan(node)) {
+        const region = this._determineRegion(node);
+
+        regions.push(region);
+      }
+    }
+    if (regions.length) {
+      if (additionalMode) {
+        item.annotation.extendSelectionWith(regions);
+      } else {
+        item.annotation.selectAreas(regions);
+      }
+      selection.removeAllRanges();
+    }
+  };
+
+  _determineRegion(element) {
+    if (matchesSelector(element, this._regionSpanSelector)) {
+      const span = element.tagName === "SPAN" ? element : element.closest(this._regionSpanSelector);
+      const { item } = this.props;
+
+      return item.regs.find(region => region.find(span));
+    }
+  }
+
+  onMouseUp(ev) {
     const item = this.props.item;
-    var selectedRanges = this.captureDocumentSelection();
     const states = item.activeStates();
 
-    if (!states || states.length === 0) return;
+    if (!states || states.length === 0 || ev.ctrlKey || ev.metaKey) return this._selectRegions(ev.ctrlKey || ev.metaKey);
+
+    const selectedRanges = this.captureDocumentSelection();
 
     if (selectedRanges.length === 0) {
       return;

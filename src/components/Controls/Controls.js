@@ -1,6 +1,6 @@
 import React from "react";
-import { observer, inject } from "mobx-react";
-import { CheckOutlined, CheckCircleOutlined } from "@ant-design/icons";
+import { inject, observer } from "mobx-react";
+import { CheckCircleOutlined, CheckOutlined } from "@ant-design/icons";
 
 import Hint from "../Hint/Hint";
 import { DraftPanel } from "../Annotations/Annotations";
@@ -15,7 +15,7 @@ export default inject("store")(
     /**
      * Buttons of Controls
      */
-    let buttons = {
+    const buttons = {
       skip: "",
       update: "",
       submit: "",
@@ -100,7 +100,7 @@ export default inject("store")(
       }
     }
 
-    let content = (
+    const content = (
       <div className={styles.block}>
         <div className={styles.wrapper}>
           <div className={styles.container}>

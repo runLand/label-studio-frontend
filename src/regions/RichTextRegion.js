@@ -52,7 +52,7 @@ const Model = types
     },
 
     serialize() {
-      let res = {
+      const res = {
         value: {},
       };
 
@@ -62,20 +62,36 @@ const Model = types
           end: self.endOffset,
         });
       } else {
-        // Calculate proper XPath right before serialization
-        const root = self._getRootNode(true);
-        const range = findRangeNative(
-          self.globalOffsets.start,
-          self.globalOffsets.end,
-          root,
-        );
+        try {
+          // Calculate proper XPath right before serialization
+          const root = self._getRootNode(true);
+          const range = findRangeNative(
+            self.globalOffsets.start,
+            self.globalOffsets.end,
+            root,
+          );
 
-        const xpathRange = xpath.fromRange(range, root);
+          if (!range) throw new Error;
 
-        Object.assign(res.value, {
-          ...xpathRange,
-          globalOffsets: self.globalOffsets?.toJSON(),
-        });
+          const xpathRange = xpath.fromRange(range, root);
+
+          Object.assign(res.value, {
+            ...xpathRange,
+            globalOffsets: self.globalOffsets?.toJSON(),
+          });
+        } catch(e) {
+          // regions may be broken, so they don't have globalOffsets
+          // or they can't be applied on current html, so just keep them untouched
+          const { start, end, startOffset, endOffset } = self;
+
+          Object.assign(res.value, { start, end, startOffset, endOffset });
+
+          if (self.globalOffsets) {
+            Object.assign(res.value, {
+              globalOffsets: self.globalOffsets?.toJSON(),
+            });
+          }
+        }
       }
 
       if (self.object.savetextresult === "yes" && isDefined(self.text)) {
@@ -121,6 +137,8 @@ const Model = types
           root,
         );
 
+        if (!rangeFromGlobal) return;
+
         const normedRange = xpath.fromRange(rangeFromGlobal, root);
 
         if (!isDefined(normedRange)) return;
@@ -159,7 +177,7 @@ const Model = types
     },
 
     _createNativeRange(useOriginalContent = false) {
-      let rootNode = self._getRootNode(useOriginalContent);
+      const rootNode = self._getRootNode(useOriginalContent);
 
       if (rootNode === undefined) return undefined;
 
@@ -169,6 +187,8 @@ const Model = types
         if (self.isText) {
           const { startContainer, endContainer } = Utils.Selection.findRange(startOffset, endOffset, rootNode);
           const range = document.createRange();
+
+          if (!startContainer || !endContainer) return;
 
           range.setStart(startContainer.node, startContainer.position);
           range.setEnd(endContainer.node, endContainer.position);

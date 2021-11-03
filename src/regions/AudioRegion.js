@@ -1,4 +1,4 @@
-import { types, getRoot } from "mobx-state-tree";
+import { getRoot, types } from "mobx-state-tree";
 
 import WithStatesMixin from "../mixins/WithStates";
 import Constants from "../core/Constants";
@@ -29,7 +29,7 @@ const Model = types
 
     wsRegionElement(wsRegion) {
       const elID = wsRegion.id;
-      let el = document.querySelector(`[data-id="${elID}"]`);
+      const el = document.querySelector(`[data-id="${elID}"]`);
 
       return el;
     },
@@ -71,7 +71,7 @@ const Model = types
      * @returns {AudioRegionResult}
      */
     serialize() {
-      let res = {
+      const res = {
         original_length: self.object._ws?.getDuration(),
         value: {
           start: self.start,
@@ -144,7 +144,7 @@ const Model = types
     },
 
     setHighlight(val) {
-      self.highlighted = val;
+      self._highlighted = val;
 
       if (val) {
         self.updateColor(0.8);
@@ -159,7 +159,7 @@ const Model = types
       if (self._ws_region) self._ws_region.remove();
     },
 
-    onClick() {
+    onClick(wavesurfer, ev) {
       // if (! self.editable) return;
 
       if (!self.annotation.relationMode) {
@@ -170,7 +170,7 @@ const Model = types
         self._ws_region.update({ color: Utils.Colors.rgbaChangeAlpha(self.selectedregionbg, 0.8) });
       }
 
-      self.onClickRegion();
+      self.onClickRegion(ev);
     },
 
     onMouseOver() {
@@ -191,6 +191,7 @@ const Model = types
       self.start = self._ws_region.start;
       self.end = self._ws_region.end;
       self.updateColor(self.selected ? 0.8 : 0.3);
+      self.notifyDrawingFinished();
     },
 
     toggleHidden(e) {

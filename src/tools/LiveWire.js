@@ -20,26 +20,26 @@ const ToolView = observer(({ item }) => {
 });
 
 const _Tool = types
-  .model({})
+  .model("LiveWireTool", {})
   .views(self => ({
-    get viewClass () {
-      return <ToolView item={self} />;
+    get viewClass() {
+      return () => <ToolView item={self} />;
     },
   }))
   .actions(self => ({
-    mouseupEv () {
+    mouseupEv() {
       self.mode = "viewing";
     },
 
-    mousemoveEv () {
+    mousemoveEv() {
       if (self.mode !== "drawing") return;
     },
 
-    mousedownEv () {
+    mousedownEv() {
       self.mode = "drawing";
     },
   }));
 
-const LiveWire = types.compose(ToolMixin, _Tool, BaseTool);
+const LiveWire = types.compose(_Tool.name, ToolMixin, _Tool, BaseTool);
 
 export { LiveWire };

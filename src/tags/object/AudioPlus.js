@@ -1,6 +1,6 @@
 import React, { Fragment } from "react";
-import { observer, inject } from "mobx-react";
-import { types, getRoot, getType } from "mobx-state-tree";
+import { inject, observer } from "mobx-react";
+import { getRoot, getType, types } from "mobx-state-tree";
 
 import AudioControls from "./Audio/Controls";
 import ObjectTag from "../../components/Tags/Object";
@@ -13,10 +13,14 @@ import { AudioRegionModel } from "../../regions/AudioRegion";
 import { guidGenerator, restoreNewsnapshot } from "../../core/Helpers";
 import { ErrorMessage } from "../../components/ErrorMessage/ErrorMessage";
 import { AnnotationMixin } from "../../mixins/AnnotationMixin";
+import { SyncMixin } from "../../mixins/SyncMixin";
 
 /**
- * AudioPlus tag plays audio and shows its waveform.
+ * The AudioPlus tag plays audio and shows its waveform. Use for audio annotation tasks where you want to label regions of audio, see the waveform, and manipulate audio during annotation.
+ *
+ * Use with the following data types: audio
  * @example
+ * <!--Labeling configuration to label regions of audio and rate the audio sample-->
  * <View>
  *   <Labels name="lbl-1" toName="audio-1">
  *     <Label value="Guitar" />
@@ -26,14 +30,15 @@ import { AnnotationMixin } from "../../mixins/AnnotationMixin";
  *   <AudioPlus name="audio-1" value="$audio" />
  * </View>
  * @name AudioPlus
- * @meta_title
- * @meta_description
+ * @meta_title AudioPlus Tag for Audio Labeling
+ * @meta_description Customize Label Studio with the AudioPlus tag for advanced audio annotation tasks for machine learning and data science projects.
  * @param {string} name - Name of the element
- * @param {string} value - Value of the element
+ * @param {string} value - Data field containing path or a URL to the audio
  * @param {boolean=} [volume=false] - Whether to show a volume slider (from 0 to 1)
  * @param {boolean} [speed=false] - Whether to show a speed slider (from 0.5 to 3)
  * @param {boolean} [zoom=true] - Whether to show the zoom slider
  * @param {string} [hotkey] - Hotkey used to play or pause audio
+ * @param {string} [sync] object name to sync with
  */
 const TagAttrs = types.model({
   name: types.identifier,
@@ -86,6 +91,20 @@ const Model = types
   .actions(self => ({
     needsUpdate() {
       self.handleNewRegions();
+
+      if (self.sync) self.initSync();
+    },
+
+    handleSyncPlay() {
+      self._ws?.play();
+    },
+
+    handleSyncPause() {
+      self._ws?.pause();
+    },
+
+    handleSyncSeek(time) {
+      self._ws && (self._ws.setCurrentTime(time));
     },
 
     handleNewRegions() {
@@ -190,6 +209,19 @@ const Model = types
       return r;
     },
 
+    selectRange(ev, ws_region) {
+      const selectedRegions = self.regs.filter(r=>r.start >= ws_region.start && r.end <= ws_region.end);
+
+      ws_region.remove && ws_region.remove();
+      if (!selectedRegions.length) return;
+      // @todo: needs preventing drawing with ctrl pressed
+      // if (ev.ctrlKey || ev.metaKey) {
+      //   self.annotation.extendSelectionWith(selectedRegions);
+      //   return;
+      // }
+      self.annotation.selectAreas(selectedRegions);
+    },
+
     addRegion(ws_region) {
       // area id is assigned to WS region during deserealization
       const find_r = self.annotation.areas.get(ws_region.id);
@@ -204,7 +236,7 @@ const Model = types
       const states = self.getAvailableStates();
 
       if (states.length === 0) {
-        ws_region.remove && ws_region.remove();
+        ws_region.on("update-end", ev=>self.selectRange(ev,ws_region));
         return;
       }
 
@@ -222,6 +254,11 @@ const Model = types
      */
     handlePlay() {
       self.playing = !self.playing;
+      self._ws.isPlaying() ? self.triggerSyncPlay() : self.triggerSyncPause();
+    },
+
+    handleSeek() {
+      self.triggerSyncSeek(self._ws.getCurrentTime());
     },
 
     createWsRegion(region) {
@@ -248,7 +285,7 @@ const Model = types
     },
   }));
 
-const AudioPlusModel = types.compose("AudioPlusModel", TagAttrs, Model, ProcessAttrsMixin, ObjectBase, AnnotationMixin);
+const AudioPlusModel = types.compose("AudioPlusModel", TagAttrs, SyncMixin, ProcessAttrsMixin, ObjectBase, AnnotationMixin, Model);
 
 const HtxAudioView = ({ store, item }) => {
   if (!item._value) return null;
@@ -264,6 +301,7 @@ const HtxAudioView = ({ store, item }) => {
           src={item._value}
           selectRegion={item.selectRegion}
           handlePlay={item.handlePlay}
+          handleSeek={item.handleSeek}
           onCreate={item.wsCreated}
           addRegion={item.addRegion}
           onLoad={item.onLoad}

@@ -1,4 +1,4 @@
-import { types, getParent, getRoot, getSnapshot } from "mobx-state-tree";
+import { getParent, getRoot, getSnapshot, types } from "mobx-state-tree";
 import { guidGenerator } from "../core/Helpers";
 import Registry from "../core/Registry";
 import { AnnotationMixin } from "../mixins/AnnotationMixin";
@@ -65,6 +65,7 @@ const Result = types
       // @todo all other *labels
       labels: types.maybe(types.array(types.string)),
       htmllabels: types.maybe(types.array(types.string)),
+      hypertextlabels: types.maybe(types.array(types.string)),
       paragraphlabels: types.maybe(types.array(types.string)),
       rectanglelabels: types.maybe(types.array(types.string)),
       keypointlabels: types.maybe(types.array(types.string)),
@@ -94,6 +95,17 @@ const Result = types
 
     get mainValue() {
       return self.value[self.from_name.valueType];
+    },
+
+    mergeMainValue(value) {
+      value =  value?.toJSON ? value.toJSON() : value;
+      const mainValue = self.mainValue?.toJSON?.() ? self.mainValue?.toJSON?.() : self.mainValue;
+
+      if (typeof value !== typeof mainValue) return null;
+      if (self.type.endsWith("labels")) {
+        return value.filter(x => mainValue.includes(x));
+      }
+      return value === mainValue ? value : null;
     },
 
     get hasValue() {
@@ -137,7 +149,11 @@ const Result = types
         const results = self.annotation.results.filter(r => r.type === "choices" && r !== self);
 
         if (tagName) {
-          const result = results.find(r => r.from_name.name === tagName);
+          const result = results.find(r => {
+            if (r.from_name.name !== tagName) return false;
+            // for perRegion choices we should check that they are in the same area
+            return !r.from_name.perregion || r.area === self.area;
+          });
 
           if (!result) return false;
           if (choiceValues && !choiceValues.some(v => result.mainValue.includes(v))) return false;
@@ -212,10 +228,10 @@ const Result = types
     // label, becuase it takes color from the label
     updateAppearenceFromState() {},
 
-    serialize() {
+    serialize(options) {
       const { from_name, to_name, type, score, value } = getSnapshot(self);
       const { valueType } = self.from_name;
-      const data = self.area ? self.area.serialize() : {};
+      const data = self.area ? self.area.serialize(options) : {};
 
       if (!data) return null;
       if (!self.isSubmitable) return null;
@@ -239,10 +255,12 @@ const Result = types
         data.parentID = self.area.parentID.replace(/#.*/, "");
       }
 
-      Object.assign(data, { id, from_name, to_name, type });
+      Object.assign(data, { id, from_name, to_name, type, origin: self.area.origin });
+
       if (isDefined(value[valueType])) {
         Object.assign(data.value, { [valueType]: value[valueType] });
       }
+
       if (typeof score === "number") data.score = score;
 
       return data;
@@ -315,11 +333,11 @@ const Result = types
     },
 
     setHighlight(val) {
-      self.highlighted = val;
+      self._highlighted = val;
     },
 
     toggleHighlight() {
-      self.setHighlight(!self.highlighted);
+      self.setHighlight(!self._highlighted);
     },
 
     toggleHidden() {

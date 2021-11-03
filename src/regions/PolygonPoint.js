@@ -1,10 +1,10 @@
-import React from "react";
-import { Rect, Circle } from "react-konva";
+import React, { useState } from "react";
+import { Circle, Rect } from "react-konva";
 import { observer } from "mobx-react";
-import { types, getParent, hasParent, getRoot } from "mobx-state-tree";
+import { getParent, getRoot, hasParent, types } from "mobx-state-tree";
 
 import { guidGenerator } from "../core/Helpers";
-import { useRegionColors } from "../hooks/useRegionColor";
+import { useRegionStyles } from "../hooks/useRegionColor";
 
 const PolygonPoint = types
   .model("PolygonPoint", {
@@ -154,12 +154,17 @@ const PolygonPoint = types
 
       self.parent.setMouseOverStartPoint(false);
     },
+
+    getSkipInteractions() {
+      return self.parent.control.obj.getSkipInteractions();
+    },
   }));
 
 const PolygonPointView = observer(({ item, name }) => {
   if (!item.parent) return;
 
-  const colors = useRegionColors(item.parent);
+  const [draggable, setDraggable] = useState(true);
+  const regionStyles = useRegionStyles(item.parent);
   const sizes = {
     small: 4,
     medium: 8,
@@ -178,7 +183,7 @@ const PolygonPointView = observer(({ item, name }) => {
     item.index === 0
       ? {
         hitStrokeWidth: 12,
-        fill: colors.strokeColor || item.primary,
+        fill: regionStyles.strokeColor || item.primary,
         onMouseOver: item.handleMouseOverStartPoint,
         onMouseOut: item.handleMouseOutStartPoint,
       }
@@ -186,6 +191,8 @@ const PolygonPointView = observer(({ item, name }) => {
 
   const dragOpts = {
     onDragMove: e => {
+      if (item.getSkipInteractions()) return false;
+      if (e.target !== e.currentTarget) return;
       let { x, y } = e.target.attrs;
 
       if (x < 0) x = 0;
@@ -197,10 +204,15 @@ const PolygonPointView = observer(({ item, name }) => {
     },
 
     onDragStart: () => {
+      if (item.getSkipInteractions()) {
+        setDraggable(false);
+        return false;
+      }
       item.annotation.history.freeze();
     },
 
     onDragEnd: e => {
+      setDraggable(true);
       item.annotation.history.unfreeze();
       e.cancelBubble = true;
     },
@@ -218,6 +230,16 @@ const PolygonPointView = observer(({ item, name }) => {
 
       if (!stage) return;
       stage.container().style.cursor = "default";
+    },
+
+    onTransformEnd(e) {
+      if (e.target !== e.currentTarget) return;
+      const t = e.target;
+
+      t.setAttr("x", 0);
+      t.setAttr("y", 0);
+      t.setAttr("scaleX", 1);
+      t.setAttr("scaleY", 1);
     },
   };
 
@@ -248,13 +270,14 @@ const PolygonPointView = observer(({ item, name }) => {
           ev.cancelBubble = true;
           if (item.parent.mouseOverStartPoint) {
             item.closeStartPoint();
+            item.parent.notifyDrawingFinished();
           } else {
             item.parent.setSelectedPoint(item);
           }
         }}
         {...dragOpts}
         {...startPointAttr}
-        draggable={item.parent.editable}
+        draggable={item.parent.editable && draggable}
       />
     );
   } else {

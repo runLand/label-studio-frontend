@@ -1,23 +1,25 @@
 import React from "react";
 import { Table } from "antd";
-import { observer, inject } from "mobx-react";
-import { types, getRoot } from "mobx-state-tree";
+import { inject, observer } from "mobx-react";
+import { getRoot, types } from "mobx-state-tree";
 
 import Registry from "../../core/Registry";
 
 /**
- * Table tag, use to show object keys and values in a table.
+ * Use the Table tag to display object keys and values in a table.
  * @example
+ * <!-- Basic labeling configuration for text in a table -->
  * <View>
  *   <Table name="text-1" value="$text"></Table>
  * </View>
  * @name Table
- * @meta_title Table Tags to Display Keys & Values in Tables
- * @meta_description Label Studio Table Tags customize Label Studio by Displaying Keys & Values in Tables for machine learning and data science projects.
+ * @meta_title Table Tag to Display Keys & Values in Tables
+ * @meta_description Customize Label Studio by displaying key-value pairs in tasks for machine learning and data science projects.
  * @param {string} value
  */
 const Model = types
   .model({
+    name: types.identifier,
     type: "table",
     value: types.maybeNull(types.string),
     // _value: types.optional(types.string, ""),
@@ -61,5 +63,6 @@ const HtxTable = inject("store")(
 );
 
 Registry.addTag("table", TableModel, HtxTable);
+Registry.addObjectType(TableModel);
 
 export { HtxTable, TableModel };

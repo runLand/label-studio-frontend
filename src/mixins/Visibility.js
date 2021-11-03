@@ -1,4 +1,4 @@
-import { types, getParent } from "mobx-state-tree";
+import { getParent, types } from "mobx-state-tree";
 
 /*
  * Per Region Mixin
@@ -32,7 +32,7 @@ const VisibilityMixin = types
 
           "choice-selected": ({ tagName, choiceValue }) => {
             if (!tagName) {
-              for (let choices of self.annotation.names.values()) {
+              for (const choices of self.annotation.names.values()) {
                 if (choices.type === "choices" && choices.selectedValues && choices.selectedValues().length) {
                   return true;
                 }

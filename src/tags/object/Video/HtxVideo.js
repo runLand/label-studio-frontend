@@ -1,18 +1,21 @@
-import { Tooltip } from "antd";
 import React, { useEffect, useRef, useState } from "react";
 
 import { IconPlayerPause, IconPlayerPlay, IconPlayerStep } from "../../../assets/icons";
 import { ErrorMessage } from "../../../components/ErrorMessage/ErrorMessage";
 import ObjectTag from "../../../components/Tags/Object";
 import { Hotkey } from "../../../core/Hotkey";
-import { Elem, Block } from "../../../utils/bem";
+import { Block, Elem } from "../../../utils/bem";
 
 import "./Video.styl";
 
-const hotkeys = Hotkey();
+const hotkeys = Hotkey("Video", "Video Annotation");
 
-const PlayPause = ({ video }) => {
-  const [paused, setPaused] = useState(true);
+const PlayPause = ({ item, video }) => {
+  const [paused, setPausedState] = useState(true);
+  const setPaused = paused => {
+    setPausedState(paused);
+    paused ? item.triggerSyncPause() : item.triggerSyncPlay();
+  };
 
   useEffect(() => {
     video.onplay = () => setPaused(false);
@@ -21,19 +24,19 @@ const PlayPause = ({ video }) => {
   const onPlayPause = () => video.paused ? video.play() : video.pause();
 
   useEffect(() => {
-    hotkeys.addKey("alt+space", e => {
+    hotkeys.addNamed("video:playpause", e => {
       e.preventDefault();
       onPlayPause();
     });
-    return () => hotkeys.removeKey("alt+space");
+    return () => hotkeys.removeNamed("video:playpause");
   }, [video]);
 
   return (
-    <Tooltip title="Play/Pause [alt+space]" placement="bottomLeft">
+    <Hotkey.Tooltip name="video:playpause" placement="bottomLeft">
       <Elem name="play" onClick={onPlayPause}>
         {paused ? <IconPlayerPlay /> : <IconPlayerPause />}
       </Elem>
-    </Tooltip>
+    </Hotkey.Tooltip>
   );
 };
 
@@ -43,38 +46,37 @@ const FrameStep = ({ item, video }) => {
   const onBackward = () => { video.pause(); video.currentTime -= frameRate; };
 
   useEffect(() => {
-    hotkeys.addKey("alt+right", e => {
+    hotkeys.addNamed("video:frame-forward", e => {
       e.preventDefault();
       onForward();
     });
-    hotkeys.addKey("alt+left", e => {
+    hotkeys.addNamed("video:frame-backward", e => {
       e.preventDefault();
       onBackward();
     });
     return () => {
-      console.log("removing video hotkeys");
-      hotkeys.removeKey("alt+right");
-      hotkeys.removeKey("alt+left");
+      hotkeys.removeNamed("video:frame-forward");
+      hotkeys.removeNamed("video:frame-backward");
     };
   }, [video]);
 
   return (
     <>
-      <Tooltip title="One Frame Back [alt+left]" placement="bottomLeft">
+      <Hotkey.Tooltip name="video:frame-backward" placement="bottomLeft">
         <Elem name="frame" onClick={onBackward}>
           <IconPlayerStep style={{ transform: "rotate(180deg)" }} />
         </Elem>
-      </Tooltip>
-      <Tooltip title="One Frame Forward [alt+right]" placement="bottomLeft">
+      </Hotkey.Tooltip>
+      <Hotkey.Tooltip name="video:frame-backward" placement="bottomLeft">
         <Elem name="frame" onClick={onForward}>
           <IconPlayerStep />
         </Elem>
-      </Tooltip>
+      </Hotkey.Tooltip>
     </>
   );
 };
 
-const Progress = ({ video }) => {
+const Progress = ({ item, video }) => {
   const progressRef = useRef();
   const timeRef = useRef();
 
@@ -84,6 +86,8 @@ const Progress = ({ video }) => {
 
       timeRef.current.style.left = (percent * 100) + "%";
     };
+
+    video.onseeked = () => item.triggerSyncSeek(video.currentTime);
   }, [video]);
 
   const progress = video.currentTime / video.duration;
@@ -111,9 +115,9 @@ const Controls = ({ item, video }) => {
 
   return (
     <Elem name="controls">
-      <PlayPause video={video} />
+      <PlayPause item={item} video={video} />
       <FrameStep item={item} video={video} />
-      <Progress video={video} />
+      <Progress item={item} video={video} />
       <Sound />
     </Elem>
   );
@@ -140,7 +144,7 @@ const HtxVideoView = ({ item }) => {
         <ErrorMessage key={`err-${i}`} error={error} />
       ))}
       <Block name="video">
-        <video src={item._value} ref={item.ref} onClick={onPlayPause} />
+        <video src={item._value} ref={item.ref} onClick={onPlayPause} muted={item.muted} />
         <Controls item={item} video={mounted && item.ref.current} />
       </Block>
     </ObjectTag>

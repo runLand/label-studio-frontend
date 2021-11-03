@@ -1,6 +1,6 @@
 /* global LSF_VERSION */
 
-import { types, getEnv } from "mobx-state-tree";
+import { flow, getEnv, types } from "mobx-state-tree";
 
 import AnnotationStore from "./AnnotationStore";
 import { Hotkey } from "../core/Hotkey";
@@ -13,8 +13,9 @@ import Utils from "../utils";
 import { delay, isDefined } from "../utils/utilities";
 import messages from "../utils/messages";
 import { guidGenerator } from "../utils/unique";
+import ToolsManager from "../tools/Manager";
 
-const hotkeys = Hotkey("AppStore");
+const hotkeys = Hotkey("AppStore", "Global Hotkeys");
 
 export default types
   .model("AppStore", {
@@ -29,6 +30,14 @@ export default types
     task: types.maybeNull(Task),
 
     project: types.maybeNull(Project),
+
+    /**
+     * History of task {taskId, annotationId}:
+    */
+    taskHistory: types.array(types.model({
+      taskId: types.number,
+      annotationId: types.maybeNull(types.string),
+    }), []),
 
     /**
      * Configure the visual UI shown to the user
@@ -105,11 +114,34 @@ export default types
      */
     showComments: false,
 
+    /**
+     * Dynamic preannotations
+     */
+    autoAnnotation: false,
+
+    /**
+     * Auto accept suggested annotations
+     */
+    autoAcceptSuggestions: false,
+
+    /**
+     * Indicator for suggestions awaiting
+     */
+    awaitingSuggestions: false,
+
     users: types.optional(types.array(UserExtended), []),
+  })
+  .preProcessSnapshot((sn) => {
+    return {
+      ...sn,
+      autoAnnotation: localStorage.getItem("autoAnnotation") === "true",
+      autoAcceptSuggestions: localStorage.getItem("autoAcceptSuggestions") === "true",
+    };
   })
   .volatile(() => ({
     version: typeof LSF_VERSION === "string" ? LSF_VERSION : "0.0.0",
     initialized: false,
+    suggestionsRequest: null,
   }))
   .views(self => ({
     /**
@@ -123,6 +155,18 @@ export default types
       const match = Array.from(self.annotationStore.names.values()).map(({ type }) => !!type.match(/labels/));
 
       return match.find(v => v === true) ?? false;
+    },
+    get canGoNextTask() {
+      if (self.taskHistory && self.task && self.taskHistory.length > 1 && self.task.id !== self.taskHistory[self.taskHistory.length - 1].taskId) {
+        return true;
+      }
+      return false;
+    },
+    get canGoPrevTask() {
+      if (self.taskHistory && self.task && self.taskHistory.length > 1 && self.task.id !== self.taskHistory[0].taskId) {
+        return true;
+      }
+      return false;
     },
   }))
   .actions(self => {
@@ -149,9 +193,10 @@ export default types
         "noTask",
         "noAccess",
         "labeledSuccess",
+        "awaitingSuggestions",
       ];
 
-      for (let n of names) if (n in flags) self[n] = flags[n];
+      for (const n of names) if (n in flags) self[n] = flags[n];
     }
 
     /**
@@ -159,8 +204,8 @@ export default types
      * @param {string} name
      * @returns {string | undefined}
      */
-    function hasInterface(name) {
-      return self.interfaces.find(i => name === i) !== undefined;
+    function hasInterface(...names) {
+      return self.interfaces.find(i => names.includes(i)) !== undefined;
     }
 
     function addInterface(name) {
@@ -175,70 +220,74 @@ export default types
      * Function
      */
     function afterCreate() {
+      ToolsManager.setRoot(self);
+
       // important thing to detect Area atomatically: it hasn't access to store, only via global
       window.Htx = self;
 
+      self.attachHotkeys();
+
+      getEnv(self).events.invoke('labelStudioLoad', self);
+    }
+
+    function attachHotkeys() {
       // Unbind previous keys in case LS was re-initialized
       hotkeys.unbindAll();
 
       /**
        * Hotkey for submit
        */
-      if (self.hasInterface("submit")) hotkeys.addKey("ctrl+enter", self.submitAnnotation, "Submit a task");
+      if (self.hasInterface("submit", "update")) {
+        hotkeys.addNamed("annotation:submit", () => {
+          const entity = self.annotationStore.selected;
+
+          if (!isDefined(entity.pk) && self.hasInterface("submit")) {
+            self.submitAnnotation();
+          } else if (self.hasInterface("update")) {
+            self.updateAnnotation();
+          }
+        });
+      }
 
       /**
        * Hotkey for skip task
        */
-      if (self.hasInterface("skip")) hotkeys.addKey("ctrl+space", self.skipTask, "Skip a task");
-
-      /**
-       * Hotkey for update annotation
-       */
-      if (self.hasInterface("update")) hotkeys.addKey("alt+enter", self.updateAnnotation, "Update a task");
+      if (self.hasInterface("skip")) {
+        hotkeys.addNamed("annotation:skip", self.skipTask);
+      }
 
       /**
        * Hotkey for delete
        */
-      hotkeys.addKey(
-        "command+backspace, ctrl+backspace",
-        function() {
-          const { selected } = self.annotationStore;
+      hotkeys.addNamed("region:delete-all", () => {
+        const { selected } = self.annotationStore;
 
-          if (window.confirm(messages.CONFIRM_TO_DELETE_ALL_REGIONS)) {
-            selected.deleteAllRegions();
-          }
-        },
-        "Delete all regions",
-      );
+        if (window.confirm(messages.CONFIRM_TO_DELETE_ALL_REGIONS)) {
+          selected.deleteAllRegions();
+        }
+      });
 
       // create relation
-      hotkeys.addKey(
-        "r",
-        function() {
-          const c = self.annotationStore.selected;
+      hotkeys.overwriteNamed("region:relation", () => {
+        const c = self.annotationStore.selected;
 
-          if (c && c.highlightedNode && !c.relationMode) {
-            c.startRelationMode(c.highlightedNode);
-          }
-        },
-        "Create relation when region is selected",
-      );
+        if (c && c.highlightedNode && !c.relationMode) {
+          c.startRelationMode(c.highlightedNode);
+        }
+      });
 
       // Focus fist focusable perregion when region is selected
-      hotkeys.addKey(
-        "enter",
-        function(e) {
-          e.preventDefault();
-          const c = self.annotationStore.selected;
+      hotkeys.addNamed("region:focus", (e) => {
+        e.preventDefault();
+        const c = self.annotationStore.selected;
 
-          if (c && c.highlightedNode && !c.relationMode) {
-            c.highlightedNode.requestPerRegionFocus();
-          }
-        },
-      );
+        if (c && c.highlightedNode && !c.relationMode) {
+          c.highlightedNode.requestPerRegionFocus();
+        }
+      });
 
       // unselect region
-      hotkeys.addKey("u", function() {
+      hotkeys.addNamed("region:unselect", function() {
         const c = self.annotationStore.selected;
 
         if (c && !c.relationMode) {
@@ -246,7 +295,7 @@ export default types
         }
       });
 
-      hotkeys.addKey("h", function() {
+      hotkeys.addNamed("region:visibility", function() {
         const c = self.annotationStore.selected;
 
         if (c && c.highlightedNode && !c.relationMode) {
@@ -254,55 +303,53 @@ export default types
         }
       });
 
-      hotkeys.addKey("command+z, ctrl+z", function() {
+      hotkeys.addNamed("annotation:undo", function() {
         const { history } = self.annotationStore.selected;
 
         history && history.canUndo && history.undo();
       });
 
-      hotkeys.addKey("command+shift+z, ctrl+shift+z", function() {
+      hotkeys.addNamed("annotation:redo", function() {
         const { history } = self.annotationStore.selected;
 
         history && history.canRedo && history.redo();
       });
 
-      hotkeys.addKey(
-        "escape",
-        function() {
-          const c = self.annotationStore.selected;
+      hotkeys.addNamed("region:exit", () => {
+        const c = self.annotationStore.selected;
 
-          if (c && c.relationMode) {
-            c.stopRelationMode();
-          } else if (c && c.highlightedNode) {
-            c.regionStore.unselectAll();
-          }
-        },
-        "Unselect region, exit relation mode",
-      );
+        if (c && c.relationMode) {
+          c.stopRelationMode();
+        } else {
+          c.unselectAll();
+        }
+      });
 
-      hotkeys.addKey(
-        "backspace",
-        function() {
-          const c = self.annotationStore.selected;
+      hotkeys.addNamed("region:delete", () => {
+        const c = self.annotationStore.selected;
 
-          if (c && c.highlightedNode) {
-            c.highlightedNode.deleteRegion();
-          }
-        },
-        "Delete selected region",
-      );
+        if (c) {
+          c.deleteSelectedRegions();
+        }
+      });
 
-      hotkeys.addKey(
-        "alt+tab",
-        function() {
-          const c = self.annotationStore.selected;
+      hotkeys.addNamed("region:cycle", () => {
+        const c = self.annotationStore.selected;
 
-          c && c.regionStore.selectNext();
-        },
-        "Circle through entities",
-      );
+        c && c.regionStore.selectNext();
+      });
 
-      getEnv(self).events.invoke('labelStudioLoad', self);
+      // duplicate selected regions
+      hotkeys.addNamed("region:duplicate", (e) => {
+        const { selected } = self.annotationStore;
+        const { serializedSelection } = selected || {};
+
+        if (!serializedSelection?.length) return;
+        e.preventDefault();
+        const results = selected.appendResults(serializedSelection);
+
+        selected.selectAreas(results);
+      });
     }
 
     /**
@@ -317,6 +364,11 @@ export default types
         };
       }
       self.task = Task.create(taskObject);
+      if (self.taskHistory.findIndex((x) => x.taskId === self.task.id) === -1) {
+        self.taskHistory.push({ taskId: self.task.id,
+          annotationId: null,
+        });
+      }
     }
 
     function assignConfig(config) {
@@ -364,6 +416,7 @@ export default types
       if (self.isSubmitting) return;
 
       const entity = self.annotationStore.selected;
+      const event = entity.exists ? 'updateAnnotation' : 'submitAnnotation';
 
       entity.beforeSend();
 
@@ -371,7 +424,7 @@ export default types
 
       entity.sendUserGenerate();
       handleSubmittingFlag(() => {
-        getEnv(self).events.invoke('submitAnnotation', self, entity);
+        getEnv(self).events.invoke(event, self, entity);
       });
       entity.dropDraft();
     }
@@ -426,6 +479,14 @@ export default types
      * Reset annotation store
      */
     function resetState() {
+      // Tools are attached to the control and object tags
+      // and need to be recreated when we st a new task
+      ToolsManager.removeAllTools();
+
+      // Same with hotkeys
+      Hotkey.unbindAll();
+      self.attachHotkeys();
+
       self.annotationStore = AnnotationStore.create({ annotations: [] });
 
       // const c = self.annotationStore.addInitialAnnotation();
@@ -449,14 +510,17 @@ export default types
         const obj = as.addPrediction(p);
 
         as.selectPrediction(obj.id);
-        obj.deserializeAnnotation(p.result);
+        obj.deserializeResults(p.result.map(r => ({
+          ...r,
+          origin: "prediction",
+        })));
       });
 
       [...(completions ?? []), ...(annotations ?? [])]?.forEach((c) => {
         const obj = as.addAnnotation(c);
 
         as.selectAnnotation(obj.id);
-        obj.deserializeAnnotation(c.draft || c.result);
+        obj.deserializeResults(c.draft || c.result);
         obj.reinitHistory();
       });
 
@@ -493,8 +557,57 @@ export default types
 
         const result = item.previous_annotation_history_result ?? [];
 
-        obj.deserializeAnnotation(result);
+        obj.deserializeResults(result);
       });
+    }
+
+    const setAutoAnnotation = (value) => {
+      self.autoAnnotation = value;
+      localStorage.setItem("autoAnnotation", value);
+    };
+
+    const setAutoAcceptSuggestions = (value) => {
+      self.autoAcceptSuggestions = value;
+      localStorage.setItem("autoAcceptSuggestions", value);
+    };
+
+    const loadSuggestions = flow(function* (request, dataParser) {
+      const requestId = guidGenerator();
+
+      self.suggestionsRequest = requestId;
+
+      self.setFlags({ awaitingSuggestions: true });
+      const response = yield request;
+
+      if (requestId === self.suggestionsRequest) {
+        self.annotationStore.selected.setSuggestions(dataParser(response));
+        self.setFlags({ awaitingSuggestions: false });
+      }
+    });
+
+    function addAnnotationToTaskHistory(annotationId) {
+      const taskIndex = self.taskHistory.findIndex(({ taskId }) => taskId === self.task.id);
+
+      if (taskIndex >= 0) {
+        self.taskHistory[taskIndex].annotationId = annotationId;
+      }
+    }
+
+    function nextTask() {
+      if (self.canGoNextTask) {
+        const { taskId, annotationId } = self.taskHistory[self.taskHistory.findIndex((x) => x.taskId === self.task.id) + 1];
+
+        getEnv(self).events.invoke('nextTask', taskId, annotationId);
+      }
+    }
+
+    function prevTask() {
+      console.log(self.canGoPrevTask, self.taskHistory, self.task.id);
+      if (self.canGoPrevTask) {
+        const { taskId, annotationId } = self.taskHistory[self.taskHistory.findIndex((x) => x.taskId === self.task.id) - 1];
+
+        getEnv(self).events.invoke('prevTask', taskId, annotationId);
+      }
     }
 
     return {
@@ -508,6 +621,7 @@ export default types
       resetState,
       initializeStore,
       setHistory,
+      attachHotkeys,
 
       skipTask,
       submitDraft,
@@ -520,5 +634,13 @@ export default types
       toggleComments,
       toggleSettings,
       toggleDescription,
+
+      setAutoAnnotation,
+      setAutoAcceptSuggestions,
+      loadSuggestions,
+
+      addAnnotationToTaskHistory,
+      nextTask,
+      prevTask,
     };
   });

@@ -1,14 +1,14 @@
 import React, { Component } from "react";
-import { Card, Button, Tooltip, Badge, List, Popconfirm } from "antd";
+import { Badge, Button, Card, List, Popconfirm, Tooltip } from "antd";
 import { observer } from "mobx-react";
 import {
-  StarOutlined,
-  StarFilled,
   DeleteOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  StopOutlined,
   PlusOutlined,
+  StarFilled,
+  StarOutlined,
+  StopOutlined,
   WindowsOutlined
 } from "@ant-design/icons";
 
@@ -39,7 +39,7 @@ export const DraftPanel = observer(({ item }) => {
 });
 
 const Annotation = observer(({ item, store }) => {
-  let removeHoney = () => (
+  const removeHoney = () => (
     <Tooltip placement="topLeft" title="Unset this result as a ground truth">
       <Button
         size="small"
@@ -54,7 +54,7 @@ const Annotation = observer(({ item, store }) => {
     </Tooltip>
   );
 
-  let setHoney = () => {
+  const setHoney = () => {
     const title = item.ground_truth
       ? "Unset this result as a ground truth"
       : "Set this result as a ground truth";
@@ -207,10 +207,10 @@ const Annotation = observer(({ item, store }) => {
 });
 
 class Annotations extends Component {
-  render () {
+  render() {
     const { store } = this.props;
 
-    let title = (
+    const title = (
       <div className={styles.title + " " + styles.titlespace}>
         <div style={{ display: "flex", alignItems: "center" }}>
           <h3>Annotations</h3>

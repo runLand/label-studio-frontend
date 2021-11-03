@@ -1,13 +1,13 @@
 import React from "react";
 import { observer } from "mobx-react";
-import { types, getRoot } from "mobx-state-tree";
+import { getRoot, types } from "mobx-state-tree";
 
 import * as d3 from "d3";
 import ObjectBase from "../Base";
 import Registry from "../../../core/Registry";
 import Types from "../../../core/Types";
 import { cloneNode, guidGenerator } from "../../../core/Helpers";
-import { getOptimalWidth, getRegionColor, fixMobxObserve, sparseValues, checkD3EventLoop } from "./helpers";
+import { checkD3EventLoop, fixMobxObserve, getOptimalWidth, getRegionColor, sparseValues } from "./helpers";
 import { errorBuilder } from "../../../core/DataValidator/ConfigValidator";
 import { TagParentMixin } from "../../../mixins/TagParentMixin";
 
@@ -95,6 +95,7 @@ class ChannelD3 extends React.Component {
   gBrushes;
 
   tracker;
+  trackerX = 0;
   trackerPoint;
   trackerTime;
   trackerValue;
@@ -154,7 +155,7 @@ class ChannelD3 extends React.Component {
 
     if (isJustClick) {
       parent?.annotation.unselectAreas();
-      r.onClickRegion();
+      r.onClickRegion(d3.event.sourceEvent);
     } else {
       parent?.regionChanged(moved, i);
     }
@@ -205,15 +206,28 @@ class ChannelD3 extends React.Component {
       const nextIndex = regions.findIndex(r => r.selected) + 1;
       const region = regions[nextIndex];
 
-      parent?.annotation.unselectAreas();
-      region && region.onClickRegion();
-
+      if (region) {
+        region.onClickRegion(d3.event.sourceEvent);
+      } else {
+        parent?.annotation.unselectAreas();
+      }
       return;
     }
     const region = this.getRegion(d3.event.selection);
 
     this.brushCreator.move(this.gCreator, null);
-    if (!statesSelected) return;
+    const additionalSelection = d3.event.sourceEvent.ctrlKey || d3.event.sourceEvent.metaKey;
+
+    if (additionalSelection || !statesSelected) {
+      const regions = ranges.filter(r => r.start >= region.start && r.end <= region.end);
+
+      if (additionalSelection) {
+        parent?.annotation.extendSelectionWith(regions);
+      } else {
+        parent?.annotation.selectAreas(regions);
+      }
+      return;
+    }
     parent?.addRegion(region.start, region.end);
   };
 
@@ -283,8 +297,8 @@ class ChannelD3 extends React.Component {
 
         if (r.instant) {
           selection
-            .attr("stroke-opacity", r.selected || r.highlighted ? 0.6 : 0.2)
-            .attr("fill-opacity", r.selected || r.highlighted ? 1 : 0.6)
+            .attr("stroke-opacity", r.inSelection || r.highlighted ? 0.6 : 0.2)
+            .attr("fill-opacity", r.inSelection || r.highlighted ? 1 : 0.6)
             .attr("stroke-width", 3)
             .attr("stroke", color)
             .attr("fill", color);
@@ -293,8 +307,8 @@ class ChannelD3 extends React.Component {
           managerBrush.move(group, [at, at + 1]);
         } else {
           selection
-            .attr("stroke-opacity", r.selected || r.highlighted ? 0.8 : 0.5)
-            .attr("fill-opacity", r.selected || r.highlighted ? 0.6 : 0.3)
+            .attr("stroke-opacity", r.inSelection || r.highlighted ? 0.8 : 0.5)
+            .attr("fill-opacity", r.inSelection || r.highlighted ? 0.6 : 0.3)
             .attr("stroke", color)
             .attr("fill", color);
           managerBrush.move(group, [r.start, r.end].map(x));
@@ -327,7 +341,12 @@ class ChannelD3 extends React.Component {
         brush.move(block, [x(sticked.start), x(sticked.end)]);
         updateTracker(d3.mouse(this)[0]);
       })
-      .on("end", this.newBrushHandler));
+      .on("end", this.newBrushHandler)
+      // replacing default filter to allow ctrl-click action
+      .filter(()=>{
+        return !d3.event.button;
+      })
+    );
 
     this.gCreator.call(this.brushCreator);
   }
@@ -338,6 +357,7 @@ class ChannelD3 extends React.Component {
     if (screenX < 0 || screenX > width) return;
     const [dataX, dataY] = this.stick(screenX);
 
+    this.trackerX = dataX;
     this.tracker.attr("transform", `translate(${this.x(dataX) + 0.5},0)`);
     this.trackerTime.text(this.formatTime(dataX));
     this.trackerValue.text(this.formatValue(dataY) + " " + this.props.item.units);
@@ -383,12 +403,11 @@ class ChannelD3 extends React.Component {
     const { margin } = item.parent;
     const tickSize = this.height + margin.top;
     const shift = -margin.top;
-    const g = this.main
-      .selectAll(".xaxis")
-      .data([0])
-      .enter()
-      .append("g")
-      .attr("class", "xaxis");
+    let g = this.main.select(".xaxis");
+
+    if (!g.size()) {
+      g = this.main.append("g").attr("class", "xaxis");
+    }
 
     g.attr("transform", `translate(0,${shift})`)
       .call(
@@ -604,6 +623,7 @@ class ChannelD3 extends React.Component {
       .attr("stroke", item.strokecolor || "steelblue");
 
     this.renderTracker();
+    this.updateTracker(0); // initial value, will be updated in setRangeWithScaling
     this.renderYAxis();
     this.setRangeWithScaling(range);
     this.renderBrushCreator();
@@ -646,7 +666,7 @@ class ChannelD3 extends React.Component {
       const values = data[column];
       // indices of the first and last displayed values
       let i = d3.bisectRight(data[time], range[0]);
-      let j = d3.bisectRight(data[time], range[1]);
+      const j = d3.bisectRight(data[time], range[1]);
       // find min-max
       let min = values[i];
       let max = values[i];
@@ -701,6 +721,7 @@ class ChannelD3 extends React.Component {
 
     this.renderXAxis();
     this.renderYAxis();
+    this.updateTracker(this.x(this.trackerX));
   }
 
   componentDidUpdate(prevProps, prevState) {
@@ -734,7 +755,7 @@ class ChannelD3 extends React.Component {
   }
 
   render() {
-    this.props.ranges.map(r => fixMobxObserve(r.start, r.end, r.selected, r.highlighted, r.hidden, r.style?.fillcolor));
+    this.props.ranges.map(r => fixMobxObserve(r.start, r.end,  r.selected, r.inSelection, r.highlighted, r.hidden, r.style?.fillcolor));
     fixMobxObserve(this.props.range.map(Number));
 
     return <div className="htx-timeseries-channel" ref={this.ref} />;

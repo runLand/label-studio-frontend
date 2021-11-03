@@ -1,6 +1,6 @@
-import React, { Fragment } from "react";
+import React, { Fragment, useContext } from "react";
 import { Ellipse } from "react-konva";
-import { types, getRoot } from "mobx-state-tree";
+import { getRoot, types } from "mobx-state-tree";
 import WithStatesMixin from "../mixins/WithStates";
 import Constants  from "../core/Constants";
 import DisabledMixin from "../mixins/Normalization";
@@ -11,10 +11,12 @@ import { ImageModel } from "../tags/object/Image";
 import { guidGenerator } from "../core/Helpers";
 import { LabelOnEllipse } from "../components/ImageView/LabelOnRegion";
 import { AreaMixin } from "../mixins/AreaMixin";
-import { getBoundingBoxAfterChanges, fixRectToFit } from "../utils/image";
-import { useRegionColors } from "../hooks/useRegionColor";
+import { createDragBoundFunc, fixRectToFit, getBoundingBoxAfterChanges } from "../utils/image";
+import { useRegionStyles } from "../hooks/useRegionColor";
 import { AliveRegion } from "./AliveRegion";
 import { KonvaRegionMixin } from "../mixins/KonvaRegion";
+import { rotateBboxCoords } from "../utils/bboxCoords";
+import { ImageViewContext } from "../components/ImageView/ImageViewContext";
 
 /**
  * Ellipse object for Bounding Box
@@ -66,9 +68,27 @@ const Model = types
     supportsTransform: true,
     hideable: true,
   }))
+  .volatile(() => {
+    return {
+      useTransformer: true,
+      preferTransformer: true,
+      supportsRotate: true,
+      supportsScale: true,
+    };
+  })
   .views(self => ({
     get store() {
       return getRoot(self);
+    },
+    get bboxCoords() {
+      const bboxCoords= {
+        left: self.x - self.radiusX,
+        top: self.y - self.radiusY,
+        right: self.x + self.radiusX,
+        bottom: self.y + self.radiusY,
+      };
+
+      return self.rotation !== 0 ? rotateBboxCoords(bboxCoords, self.rotation, { x: self.x, y:self.y }) : bboxCoords;
     },
   }))
   .actions(self => ({
@@ -108,8 +128,8 @@ const Model = types
       const cx = self.x;
       const cy = self.y;
       //going to system where center coordinates are (0,0)
-      var rel_x = x - cx;
-      var rel_y = y - cy;
+      let rel_x = x - cx;
+      let rel_y = y - cy;
 
       //going to system where our ellipse has angle 0 to X-Axis via rotate matrix
       const theta = self.rotation;
@@ -244,8 +264,9 @@ const EllipseRegionModel = types.compose(
 const HtxEllipseView = ({ item }) => {
   const { store } = item;
 
-  const colors = useRegionColors(item);
+  const regionStyles = useRegionStyles(item);
   const stage = item.parent.stageRef;
+  const { suggestion } = useContext(ImageViewContext) ?? {};
 
   return (
     <Fragment>
@@ -254,16 +275,16 @@ const HtxEllipseView = ({ item }) => {
         y={item.y}
         radiusX={item.radiusX}
         radiusY={item.radiusY}
-        fill={colors.fillColor}
-        stroke={colors.strokeColor}
-        strokeWidth={colors.strokeWidth}
+        fill={regionStyles.fillColor}
+        stroke={regionStyles.strokeColor}
+        strokeWidth={regionStyles.strokeWidth}
         strokeScaleEnabled={false}
         shadowBlur={0}
         scaleX={item.scaleX}
         scaleY={item.scaleY}
         opacity={1}
         rotation={item.rotation}
-        name={item.id}
+        name={`${item.id} _transformable`}
         onTransformEnd={e => {
           const t = e.target;
 
@@ -277,12 +298,14 @@ const HtxEllipseView = ({ item }) => {
 
           t.setAttr("scaleX", 1);
           t.setAttr("scaleY", 1);
+          item.notifyDrawingFinished();
         }}
         onDragStart={e => {
           if (item.parent.getSkipInteractions()) {
             e.currentTarget.stopDrag(e.evt);
             return;
           }
+          item.annotation.history.freeze(item.id);
         }}
         onDragEnd={e => {
           const t = e.target;
@@ -295,8 +318,10 @@ const HtxEllipseView = ({ item }) => {
             t.getAttr("rotation"),
           );
           item.setScale(t.getAttr("scaleX"), t.getAttr("scaleY"));
+          item.annotation.history.unfreeze(item.id);
+          item.notifyDrawingFinished();
         }}
-        dragBoundFunc={item.parent.fixForZoom(pos => {
+        dragBoundFunc={createDragBoundFunc(item.parent,pos => {
           let { x, y } = pos;
           const { radiusX, radiusY, rotation } = item;
           const { stageHeight, stageWidth } = item.parent;
@@ -341,8 +366,9 @@ const HtxEllipseView = ({ item }) => {
           item.onClickRegion(e);
         }}
         draggable={item.editable}
+        listening={!suggestion}
       />
-      <LabelOnEllipse item={item} color={colors.strokeColor} strokewidth={colors.strokeWidth}/>
+      <LabelOnEllipse item={item} color={regionStyles.strokeColor} strokewidth={regionStyles.strokeWidth}/>
     </Fragment>
   );
 };

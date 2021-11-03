@@ -1,4 +1,4 @@
-import { types, getParent, getEnv, getRoot, destroy, detach, onSnapshot, isAlive } from "mobx-state-tree";
+import { destroy, detach, getEnv, getParent, getRoot, isAlive, onSnapshot, types } from "mobx-state-tree";
 
 import Constants from "../core/Constants";
 import { Hotkey } from "../core/Hotkey";
@@ -10,7 +10,6 @@ import Tree, { TRAVERSE_STOP } from "../core/Tree";
 import Types from "../core/Types";
 import Utils from "../utils";
 import { delay, isDefined } from "../utils/utilities";
-import { AllRegionsType } from "../regions";
 import { guidGenerator } from "../core/Helpers";
 import { DataValidator, ValidationError, VALIDATORS } from "../core/DataValidator";
 import { errorBuilder } from "../core/DataValidator/ConfigValidator";
@@ -19,7 +18,7 @@ import throttle from "lodash.throttle";
 import { ViewModel } from "../tags/visual";
 import { UserExtended } from "./UserStore";
 
-const hotkeys = Hotkey("Annotations");
+const hotkeys = Hotkey("Annotations", "Annotations");
 
 const Annotation = types
   .model("Annotation", {
@@ -42,6 +41,10 @@ const Annotation = types
     createdAgo: types.maybeNull(types.string),
     createdBy: types.optional(types.string, "Admin"),
     user: types.optional(types.maybeNull(types.safeReference(UserExtended)), null),
+
+    parent_prediction: types.maybeNull(types.integer),
+    parent_annotation: types.maybeNull(types.integer),
+    last_annotation_history: types.maybeNull(types.integer),
 
     loadedDate: types.optional(types.Date, new Date()),
     leadTime: types.maybeNull(types.number),
@@ -71,11 +74,12 @@ const Annotation = types
 
     areas: types.map(Area),
 
+    suggestions: types.map(Area),
+
     regionStore: types.optional(RegionStore, {
       regions: [],
     }),
 
-    highlightedNode: types.maybeNull(types.safeReference(AllRegionsType)),
   })
   .preProcessSnapshot(sn => {
     // sn.draft = Boolean(sn.draft);
@@ -90,6 +94,7 @@ const Annotation = types
       user,
       ground_truth: sn.honeypot ?? sn.ground_truth ?? false,
       skipped: sn.skipped || sn.was_cancelled,
+      acceptedState: sn.accepted_state ?? sn.acceptedState ?? null,
     };
   })
   .views(self => ({
@@ -117,6 +122,10 @@ const Annotation = types
       return Array.from(self.names.values()).filter(tag => !tag.toname);
     },
 
+    get regions() {
+      return Array.from(self.areas.values());
+    },
+
     get results() {
       const results = [];
 
@@ -133,6 +142,53 @@ const Annotation = types
         .filter(Boolean)
         .concat(self.relationStore.serializeAnnotation());
     },
+
+    get serializedSelection() {
+      // Dirty hack to force MST track changes
+      self.areas.toJSON();
+
+      const selectedResults = [];
+
+      self.areas.forEach(a => {
+        if (!a.inSelection) return;
+        a.results.forEach(r => {
+          selectedResults.push(r);
+        });
+      });
+
+      return selectedResults
+        .map(r => r.serialize())
+        .filter(Boolean);
+    },
+
+    get highlightedNode() {
+      return self.regionStore.selection.highlighted;
+    },
+
+    get hasSelection() {
+      return self.regionStore.selection.hasSelection;
+    },
+    get selectionSize() {
+      return self.regionStore.selection.size;
+    },
+
+    get selectedRegions() {
+      return Array.from(self.regionStore.selection.selected.values());
+    },
+
+    // existing annotation which can be updated
+    get exists() {
+      const dataExists = (self.userGenerate && self.sentUserGenerate) || isDefined(self.versions.result);
+      const pkExists = isDefined(self.pk);
+
+      return dataExists && pkExists;
+    },
+
+    get onlyTextObjects() {
+      return self.objects.reduce((res, obj) => {
+        return res && ['text', 'hypertext'].includes(obj.type);
+      }, true);
+    },
   }))
   .volatile(() => ({
     hidden: false,
@@ -147,6 +203,7 @@ const Annotation = types
     reinitHistory() {
       self.history.reinit();
       self.autosave && self.autosave.cancel();
+      if (self.type === "annotation") self.setInitialValues();
     },
 
     setEdit(val) {
@@ -170,7 +227,6 @@ const Annotation = types
 
       if (ivokeEvent) {
         getEnv(self).events.invoke('groundTruth', self.store, self, value);
-        console.log('invoked');
       }
     },
 
@@ -188,6 +244,7 @@ const Annotation = types
 
     updatePersonalKey(value) {
       self.pk = value;
+      getRoot(self).addAnnotationToTaskHistory(self.pk);
     },
 
     toggleVisibility(visible) {
@@ -201,33 +258,40 @@ const Annotation = types
     selectArea(area) {
       if (self.highlightedNode === area) return;
       // if (current) current.setSelected(false);
-      self.unselectAll();
-      self.highlightedNode = area;
+      self.regionStore.highlight(area);
       // area.setSelected(true);
-      // @todo some backward compatibility, should be rewritten to state handling
-      // @todo but there are some actions should be performed like scroll to region
-      area.selectRegion && area.selectRegion();
-      area.perRegionTags.forEach(tag => tag.updateFromResult?.(undefined));
-      area.results.forEach(r => r.from_name.updateFromResult?.(r.mainValue));
+    },
+
+    toggleRegionSelection(area, isSelected) {
+      self.regionStore.toggleSelection(area, isSelected);
+    },
+
+    selectAreas(areas) {
+      self.unselectAreas();
+      self.extendSelectionWith(areas);
+    },
+
+    extendSelectionWith(areas) {
+      for (const area of (Array.isArray(areas) ? areas : [areas])) {
+        self.regionStore.toggleSelection(area, true);
+      }
     },
 
     unselectArea(area) {
       if (self.highlightedNode !== area) return;
       // area.setSelected(false);
-      self.unselectAll();
+      self.regionStore.toggleSelection(area, false);
     },
 
     unselectAreas() {
-      const node = self.highlightedNode;
+      if (!self.selectionSize) return;
+      self.regionStore.clearSelection();
+    },
 
-      if (!node) return;
-
-      // eslint-disable-next-line no-unused-expressions
-      node.perRegionTags.forEach(tag => tag.submitChanges?.());
-
-      self.highlightedNode = null;
-      // eslint-disable-next-line no-unused-expressions
-      node.afterUnselectRegion?.();
+    deleteSelectedRegions() {
+      self.selectedRegions.forEach(region => {
+        region.deleteRegion();
+      });
     },
 
     unselectStates() {
@@ -347,7 +411,7 @@ const Annotation = types
      * @param {*} region
      */
     deleteRegion(region) {
-      let { regions } = self.regionStore;
+      const { regions } = self.regionStore;
       // move all children into the parent region of the given one
       const children = regions.filter(r => r.parentID === region.id);
 
@@ -399,13 +463,13 @@ const Annotation = types
       if (!isDraft && !self.versions.draft) return;
       self.autosave.flush();
       self.pauseAutosave();
-      if (isDraft) self.versions.draft = self.serializeAnnotation();
+      if (isDraft) self.versions.draft = self.serializeAnnotation({ fast: true });
       self.deleteAllRegions({ deleteReadOnly: true });
       if (isDraft) {
-        self.deserializeAnnotation(self.versions.result);
+        self.deserializeResults(self.versions.result);
         self.draftSelected = false;
       } else {
-        self.deserializeAnnotation(self.versions.draft);
+        self.deserializeResults(self.versions.draft);
         self.draftSelected = true;
       }
       self.updateObjects();
@@ -431,7 +495,7 @@ const Annotation = types
         () => {
           if (self.autosave.paused) return;
 
-          const result = self.serializeAnnotation();
+          const result = self.serializeAnnotation({ fast: true });
           // if this is new annotation and no regions added yet
 
           if (!self.pk && !result.length) return;
@@ -523,7 +587,7 @@ const Annotation = types
 
       let audiosNum = 0;
       let audioNode = null;
-      let mod = "shift+space";
+      const mod = "shift+space";
       let comb = mod;
 
       // [TODO] we need to traverse this two times, fix
@@ -619,44 +683,93 @@ const Annotation = types
       return area;
     },
 
-    serializeAnnotation() {
-      return self.serialized;
+    appendResults(results) {
+      const regionIdMap = {};
+      const prevSize = self.regionStore.regions.length;
+
+      // Generate new ids to prevent collisions
+      results.forEach((result)=>{
+        const regionId = result.id;
+
+        if (!regionIdMap[regionId]) {
+          regionIdMap[regionId] = guidGenerator();
+        }
+        result.id = regionIdMap[regionId];
+      });
+
+      self.deserializeResults(results);
+      self.updateObjects();
+      return self.regionStore.regions.slice(prevSize);
+    },
+
+    serializeAnnotation(options) {
+      // return self.serialized;
+
+      document.body.style.cursor = "wait";
+
+      const result = self.results
+        .map(r => r.serialize(options))
+        .filter(Boolean)
+        .concat(self.relationStore.serializeAnnotation(options));
+
+      document.body.style.cursor = "default";
+
+      return result;
     },
 
     // Some annotations may be created with wrong assumptions
     // And this problems are fixable, so better to fix them on start
     fixBrokenAnnotation(json) {
-      return (json ?? []).filter(obj => {
-        if (obj.type === 'relation') return true;
+      return (json ?? []).reduce((res, objRaw) => {
+        const obj = JSON.parse(JSON.stringify(objRaw));
+
+        if (obj.type === 'relation') {
+          res.push(objRaw);
+          return res;
+        }
+
         if (obj.type === "htmllabels") obj.type = "hypertextlabels";
         if (obj.normalization) obj.meta = { ...obj.meta, text: [obj.normalization] };
+        const tagNames = self.names;
 
         // Clear non-existent labels
         if (obj.type.endsWith("labels")) {
           const keys = Object.keys(obj.value);
 
-          for (const key of keys) {
+          for (let key of keys) {
             if (key.endsWith("labels")) {
-              if (self.names.has(obj.from_name)) {
-                const labelsContainer = self.names.get(obj.from_name);
+              const hasControlTag = tagNames.has(obj.from_name) || tagNames.has("labels");
+
+              if (hasControlTag) {
+                const labelsContainer = tagNames.get(obj.from_name) ?? tagNames.get("labels");
                 const value = obj.value[key];
 
                 if (value && value.length && labelsContainer.type.endsWith("labels")) {
                   const filteredValue = value.filter(labelName => !!labelsContainer.findLabel(labelName));
+                  const oldKey = key;
+
+                  key = key === labelsContainer.type ? key : labelsContainer.type;
+
+                  if (oldKey !== key) {
+                    obj.type = key;
+                    obj.value[key] = obj.value[oldKey];
+                    delete obj.value[oldKey];
+                  }
 
                   if (filteredValue.length !== value.length) {
-                    obj.value[key] = value.filter(labelName => !!labelsContainer.findLabel(labelName));
+                    obj.value[key] = filteredValue;
                   }
                 }
               }
+
               if (
-                !self.names.has(obj.from_name) ||
-                (!obj.value[key].length && !self.names.get(obj.from_name).allowempty)
+                !tagNames.has(obj.from_name) ||
+                (!obj.value[key].length && !tagNames.get(obj.from_name).allowempty)
               ) {
                 delete obj.value[key];
-                if (self.names.has(obj.to_name)) {
+                if (tagNames.has(obj.to_name)) {
                   // Redirect references to existent tool
-                  const targetObject = self.names.get(obj.to_name);
+                  const targetObject = tagNames.get(obj.to_name);
                   const states = targetObject.states();
 
                   if (states?.length) {
@@ -680,55 +793,58 @@ const Annotation = types
           }
         }
 
-        return self.names.has(obj.from_name) && self.names.has(obj.to_name);
+        if (tagNames.has(obj.from_name) && tagNames.has(obj.to_name)) {
+          res.push(obj);
+        }
+
+        return res;
+      }, []);
+    },
+
+    setSuggestions(rawSuggestions) {
+      self.suggestions.clear();
+
+      self.deserializeResults(rawSuggestions, {
+        suggestions: true,
       });
+
+      if (getRoot(self).autoAcceptSuggestions) {
+        self.acceptAllSuggestions();
+      } else {
+        self.suggestions.forEach((suggestion) => {
+          if (['richtextregion', 'text'].includes(suggestion.type)) {
+            self.acceptSuggestion(suggestion.id);
+          }
+        });
+      }
+
+      self.objects.forEach(obj => obj.needsUpdate?.());
     },
 
     /**
-     * Deserialize annotation of models
+     * Deserialize results
+     * @param {string | Array<any>} json Input results
+     * @param {{
+     * suggestions: boolean
+     * }} options Deserialization options
      */
-    deserializeAnnotation(json) {
+    deserializeResults(json, { suggestions=false } = {}) {
       try {
-        let objAnnotation = json;
-
-        if (typeof objAnnotation !== "object") {
-          objAnnotation = JSON.parse(objAnnotation);
-        }
-
-        objAnnotation = self.fixBrokenAnnotation(objAnnotation ?? []);
+        const objAnnotation = self.prepareAnnotation(json);
+        const areas = suggestions ? self.suggestions : self.areas;
 
         self._initialAnnotationObj = objAnnotation;
 
         objAnnotation.forEach(obj => {
-          if (obj["type"] !== "relation") {
-            const { id, value: rawValue, type, ...data } = obj;
-
-            const { type: tagType } = self.names.get(obj.to_name) ?? {};
-
-            // avoid duplicates of the same areas in different annotations/predictions
-            const areaId = `${id || guidGenerator()}#${self.id}`;
-            const resultId = `${data.from_name}@${areaId}`;
-            const value = self.prepareValue(rawValue, tagType);
-
-            let area = self.areas.get(areaId);
-
-            if (!area) {
-              const areaSnapshot = {
-                id: areaId,
-                object: data.to_name,
-                ...data,
-                ...value,
-                value,
-              };
-
-              area = self.areas.put(areaSnapshot);
-            }
-
-            area.addResult({ ...data, id: resultId, type, value });
-          }
+          self.deserializeSingleResult(obj,
+            (id) => areas.get(id),
+            (snapshot) => areas.put(snapshot),
+          );
         });
 
-        self.results.filter(r => r.area.classification).forEach(r => r.from_name.updateFromResult?.(r.mainValue));
+        self.results
+          .filter(r => r.area.classification)
+          .forEach(r => r.from_name.updateFromResult?.(r.mainValue));
 
         objAnnotation.forEach(obj => {
           if (obj["type"] === "relation") {
@@ -740,10 +856,55 @@ const Annotation = types
             );
           }
         });
-
       } catch (e) {
         console.error(e);
         self.list.addErrors([errorBuilder.generalError(e)]);
+      }
+    },
+
+    deserializeAnnotation(...args) {
+      console.warn('deserializeAnnotation() is deprecated. Use deserializeResults() instead');
+      return self.deserializeResults(...args);
+    },
+
+    prepareAnnotation(rawAnnotation) {
+      let objAnnotation = rawAnnotation;
+
+      if (typeof objAnnotation !== "object") {
+        objAnnotation = JSON.parse(objAnnotation);
+      }
+
+      objAnnotation = self.fixBrokenAnnotation(objAnnotation ?? []);
+
+      return objAnnotation;
+    },
+
+    deserializeSingleResult(obj, getArea, createArea) {
+      if (obj["type"] !== "relation") {
+        const { id, value: rawValue, type, ...data } = obj;
+
+        const { type: tagType } = self.names.get(obj.to_name) ?? {};
+
+        // avoid duplicates of the same areas in different annotations/predictions
+        const areaId = `${id || guidGenerator()}#${self.id}`;
+        const resultId = `${data.from_name}@${areaId}`;
+        const value = self.prepareValue(rawValue, tagType);
+
+        let area = getArea(areaId);
+
+        if (!area) {
+          const areaSnapshot = {
+            id: areaId,
+            object: data.to_name,
+            ...data,
+            ...value,
+            value,
+          };
+
+          area = createArea(areaSnapshot);
+        }
+
+        area.addResult({ ...data, id: resultId, type, value });
       }
     },
 
@@ -771,6 +932,32 @@ const Annotation = types
       }
 
       return value;
+    },
+
+    acceptAllSuggestions() {
+      Array.from(self.suggestions.keys()).forEach((id) => {
+        self.acceptSuggestion(id);
+      });
+    },
+
+    rejectAllSuggestions() {
+      Array.from(self.suggestions.keys).forEach((id) => {
+        self.suggestions.delete(id);
+      });
+    },
+
+    acceptSuggestion(id) {
+      const item = self.suggestions.get(id);
+
+      self.areas.set(id, {
+        ...item.toJSON(),
+        fromSuggestion: true,
+      });
+      self.suggestions.delete(id);
+    },
+
+    rejectSuggestion(id) {
+      self.suggestions.delete(id);
     },
   }));
 
@@ -884,7 +1071,7 @@ export default types
       c.setupHotKeys();
 
       getEnv(self).events.invoke('selectAnnotation', c, selected);
-
+      if (c.pk) getParent(self).addAnnotationToTaskHistory(c.pk);
       return c;
     }
 
@@ -988,7 +1175,7 @@ export default types
       const pk = options.pk || options.id;
 
       //
-      let node = {
+      const node = {
         userGenerate: false,
 
         ...options,
@@ -1062,9 +1249,9 @@ export default types
       self.selectedHistory = item;
     }
 
-    function addAnnotationFromPrediction(prediction) {
+    function addAnnotationFromPrediction(entity) {
       // immutable work, because we'll change ids soon
-      const s = prediction._initialAnnotationObj.map(r => ({ ...r }));
+      const s = entity._initialAnnotationObj.map(r => ({ ...r }));
       const c = self.addAnnotation({ userGenerate: true, result: s });
 
       const ids = {};
@@ -1088,8 +1275,18 @@ export default types
       });
 
       selectAnnotation(c.id);
-      c.deserializeAnnotation(s);
+      c.deserializeResults(s);
       c.updateObjects();
+
+      // parent link for the new annotations
+      if (entity.pk) {
+        if (entity.type === 'prediction') {
+          c.parent_prediction = parseInt(entity.pk);
+        }
+        else if (entity.type === 'annotation') {
+          c.parent_annotation = parseInt(entity.pk);
+        }
+      }
 
       return c;
     }

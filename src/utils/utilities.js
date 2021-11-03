@@ -55,6 +55,17 @@ export function getUrl(i, text) {
 }
 
 /**
+ * Check if given string is a valid url for object data
+ * @param {string} str              - String to check
+ * @param {boolean} [relative=true] - Whether relative urls are good or nood
+ */
+export function isValidObjectURL(str, relative = false) {
+  if (!str) return false;
+  if (relative && str.startsWith("/")) return true;
+  return /^https?:\/\//.test(str);
+}
+
+/**
  * Convert MS to Time String
  * Example: 2000 -> 00:00:02
  * @param {number} ms
@@ -73,13 +84,13 @@ export function flatten(arr) {
 }
 
 export function hashCode(str) {
-  var hash = 0;
+  let hash = 0;
 
   if (str.length === 0) {
     return hash + "";
   }
-  for (var i = 0; i < str.length; i++) {
-    var char = str.charCodeAt(i);
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
 
     hash = (hash << 5) - hash + char;
     hash = hash & hash; // Convert to 32bit integer
@@ -164,7 +175,7 @@ export const chunks = (source, chunkSize) => {
   return result;
 };
 
-export const userDisplayName = (user) => {
+export const userDisplayName = (user = {}) => {
   const firstName = user.firstName ?? user.firstName;
   const lastName = user.lastName ?? user.lastName;
 
@@ -183,4 +194,24 @@ export const camelizeKeys = (object) => {
       return [toCamelCase(key), value];
     }
   }));
+};
+
+export function minMax(items) {
+  return items.reduce((acc, val) => {
+    acc[0] = acc[0] === undefined || val < acc[0] ? val : acc[0];
+    acc[1] = acc[1] === undefined || val > acc[1] ? val : acc[1];
+    return acc;
+  }, []);
+}
+
+// Detects if current OS is macOS
+export function isMacOS() {
+  return navigator.platform.indexOf('Mac') > -1;
+}
+
+export const triggerResizeEvent = () => {
+  const event = new Event("resize");
+
+  event.initEvent("resize", false, false);
+  window.dispatchEvent(event);
 };

@@ -20,8 +20,9 @@ const result = [
     from_name: "ner",
     to_name: "text",
     type: "hypertextlabels",
+    origin: "manual",
     value: {
-      start: "/div[1]/div[2]",
+      start: "/div[1]/div[2]/div[1]/p[1]/b[1]/text()[1]",
       end: "/div[1]/div[2]/div[1]/p[1]/text()[1]",
       startOffset: 0,
       endOffset: 17,
@@ -30,7 +31,7 @@ const result = [
         end: 105,
       },
       text: "Vincent: Look, Mr. Wolfe",
-      htmllabels: ["Date"],
+      hypertextlabels: ["Date"],
     },
   },
   {
@@ -38,6 +39,7 @@ const result = [
     from_name: "ner",
     to_name: "text",
     type: "hypertextlabels",
+    origin: "manual",
     value: {
       start: "/div[1]/div[1]/div[1]/p[1]/b[1]/text()[1]",
       end: "/div[1]/div[1]/div[1]/p[1]/b[1]/text()[1]",
@@ -48,7 +50,7 @@ const result = [
         end: 5,
       },
       text: "Jules",
-      htmllabels: ["Person"],
+      hypertextlabels: ["Person"],
     },
   },
   {
@@ -56,8 +58,9 @@ const result = [
     from_name: "ner",
     to_name: "text",
     type: "hypertextlabels",
+    origin: "manual",
     value: {
-      start: "/div[1]/div[3]",
+      start: "/div[1]/div[3]/div[1]/p[1]/b[1]/text()[1]",
       end: "/div[1]/div[3]/div[1]/p[1]/b[1]/text()[1]",
       startOffset: 0,
       endOffset: 8,
@@ -66,7 +69,7 @@ const result = [
         end: 188,
       },
       text: "The Wolf",
-      htmllabels: ["Person"],
+      hypertextlabels: ["Person"],
     },
   },
   {
@@ -74,17 +77,18 @@ const result = [
     from_name: "ner",
     to_name: "text",
     type: "hypertextlabels",
+    origin: "manual",
     value: {
       start: "/div[1]/div[1]/div[1]/p[1]/text()[1]",
       end: "/div[1]/div[2]/div[1]/p[1]/text()[1]",
       startOffset: 64,
-      endOffset: 16,
+      endOffset: 33,
       globalOffsets: {
         start: 69,
-        end: 104,
+        end: 121,
       },
-      text: "appreciated.\\n\\nVincent: Look, Mr. Wolfe, I respect you.",
-      htmllabels: ["Date"],
+      text: "appreciated.\n\nVincent: Look, Mr. Wolfe, I respect you.",
+      hypertextlabels: ["Date"],
     },
   },
 ];

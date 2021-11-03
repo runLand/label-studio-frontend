@@ -1,24 +1,28 @@
+import { inject, observer } from "mobx-react";
+import { getType, types } from "mobx-state-tree";
 import ColorScheme from "pleasejs";
 import React from "react";
-import { types } from "mobx-state-tree";
-import { observer, inject } from "mobx-react";
 
-import ProcessAttrsMixin from "../../mixins/ProcessAttrs";
-import Registry from "../../core/Registry";
+import { Tooltip } from "../../common/Tooltip/Tooltip";
+import InfoModal from "../../components/Infomodal/Infomodal";
+import { Label } from "../../components/Label/Label";
 import Constants from "../../core/Constants";
+import { customTypes } from "../../core/CustomTypes";
+import { guidGenerator } from "../../core/Helpers";
+import Registry from "../../core/Registry";
+import Types from "../../core/Types";
+import { AnnotationMixin } from "../../mixins/AnnotationMixin";
+import ProcessAttrsMixin from "../../mixins/ProcessAttrs";
+import { TagParentMixin } from "../../mixins/TagParentMixin";
+import ToolsManager from "../../tools/Manager";
 import Utils from "../../utils";
 import { parseValue } from "../../utils/data";
-import { guidGenerator } from "../../core/Helpers";
-import InfoModal from "../../components/Infomodal/Infomodal";
-import { customTypes } from "../../core/CustomTypes";
-import { AnnotationMixin } from "../../mixins/AnnotationMixin";
-import { Label } from "../../components/Label/Label";
-import { TagParentMixin } from "../../mixins/TagParentMixin";
-import Types from "../../core/Types";
 
 /**
- * Label tag represents a single label.
+ * Label tag represents a single label. Use with the Labels tag, including BrushLabels, EllipseLabels, HyperTextLabels, KeyPointLabels, and other Labels tags to specify the value of a specific label.
+ *
  * @example
+ * <!--Basic named entity recognition labeling configuration for text-->
  * <View>
  *   <Labels name="type" toName="txt-1">
  *     <Label alias="B" value="Brand" />
@@ -27,18 +31,19 @@ import Types from "../../core/Types";
  *   <Text name="txt-1" value="$text" />
  * </View>
  * @name Label
- * @meta_title Label Tags for Single Label Tags
- * @meta_description Label Studio Label Tags customize Label Studio with single label tags for machine learning and data science projects.
+ * @meta_title Label Tag for Single Label Tags
+ * @meta_description Customize Label Studio with the Label tag to assign a single label to regions in a task for machine learning and data science projects.
  * @param {string} value                    - Value of the label
  * @param {boolean} [selected=false]        - Whether to preselect this label
- * @param {number} [maxUsages]              - Maximum available uses of the label
+ * @param {number} [maxUsages]              - Maximum number of times this label can be used per task
+ * @param {string} [hint]                   - Hint for label on hover
  * @param {string} [hotkey]                 - Hotkey to use for the label. Automatically generated if not specified
  * @param {string} [alias]                  - Label alias
  * @param {boolean} [showAlias=false]       - Whether to show alias inside label text
- * @param {string} [aliasStyle=opacity:0.6] - Alias CSS style
+ * @param {string} [aliasStyle=opacity:0.6] - CSS style for the alias
  * @param {string} [size=medium]            - Size of text in the label
- * @param {string} [background=#36B37E]     - Background color of an active label
- * @param {string} [selectedColor=#ffffff]  - Color of text in an active label
+ * @param {string} [background=#36B37E]     - Background color of an active label in hexadecimal
+ * @param {string} [selectedColor=#ffffff]  - Color of text in an active label in hexadecimal
  * @param {symbol|word} [granularity]       - Set control based on symbol or word selection (only for Text)
  */
 const TagAttrs = types.model({
@@ -46,6 +51,7 @@ const TagAttrs = types.model({
   selected: types.optional(types.boolean, false),
   maxusages: types.maybeNull(types.string),
   alias: types.maybeNull(types.string),
+  hint: types.maybeNull(types.string),
   hotkey: types.maybeNull(types.string),
   showalias: types.optional(types.boolean, false),
   aliasstyle: types.optional(types.string, "opacity: 0.6"),
@@ -73,7 +79,7 @@ const Model = types.model({
     "TimeSeriesLabels",
     "ParagraphLabels",
   ]),
-}).volatile(() => {
+}).volatile(self => {
   return {
     initiallySelected: self.selected,
     isEmpty: false,
@@ -91,9 +97,9 @@ const Model = types.model({
     return used;
   },
 
-  canBeUsed() {
+  canBeUsed(count = 1) {
     if (!self.maxUsages) return true;
-    return self.usedAlready() < self.maxUsages;
+    return self.usedAlready() + count <= self.maxUsages;
   },
 })).actions(self => ({
   setEmpty() {
@@ -106,16 +112,21 @@ const Model = types.model({
     // here we check if you click on label from labels group
     // connected to the region on the same object tag that is
     // right now highlighted, and if that region is readonly
-    const region = self.annotation.highlightedNode;
-    const sameObject = region && region.parent?.name === self.parent?.toname;
+    const sameObjectSelectedRegions = self.annotation.selectedRegions.filter(region => {
+      return region.parent?.name === self.parent?.toname;
+    });
+    const affectedRegions = sameObjectSelectedRegions.filter(region => {
+      return region.editable;
+    });
 
-    if (region && region.readonly === true && sameObject) return;
 
     // one more check if that label can be selected
     if (!self.annotation.editable) return;
 
+    if (sameObjectSelectedRegions.length > 0 && affectedRegions.length === 0) return;
+
     // don't select if it can not be used
-    if (!self.selected && !self.canBeUsed()) {
+    if (!!affectedRegions.length && !self.selected && !self.canBeUsed(affectedRegions.filter(region => region.results).length)) {
       InfoModal.warning(`You can't use ${self.value} more than ${self.maxUsages} time(s)`);
       return;
     }
@@ -125,16 +136,19 @@ const Model = types.model({
     // check if there is a region selected and if it is and user
     // is changing the label we need to make sure that region is
     // not going to endup without results at all
-    if (region && sameObject) {
+    const applicableRegions =  affectedRegions.filter(region => {
       if (
         labels.selectedLabels.length === 1 &&
         self.selected &&
         region.results.length === 1 &&
         (!self.parent?.allowempty || self.isEmpty)
       )
-        return;
-      if (self.parent?.type !== "labels" && !self.parent?.type.includes(region?.results[0].type)) return;
-    }
+        return false;
+      if (self.parent?.type !== "labels" && !self.parent?.type.includes(region.results[0].type)) return false;
+      return true;
+    });
+
+    if (sameObjectSelectedRegions.length > 0 && applicableRegions.length === 0) return;
 
     // if we are going to select label and it would be the first in this labels group
     if (!labels.selectedLabels.length && !self.selected) {
@@ -144,15 +158,20 @@ const Model = types.model({
         forEach(tag => tag.unselectAll && tag.unselectAll());
 
       // unselect other tools if they exist and selected
+      const manager = ToolsManager.getInstance({ name: self.parent.toname });
       const tool = Object.values(self.parent?.tools || {})[0];
 
-      if (tool && tool.manager.findSelectedTool() !== tool) {
-        tool.manager.selectTool(tool, true);
+      const selectedTool = manager.findSelectedTool();
+      const sameType = (tool && selectedTool) ? getType(selectedTool).name === getType(tool).name : false;
+      const sameLabel = selectedTool ? tool?.control?.name === selectedTool?.control?.name : false;
+
+      if (tool && (!selectedTool || (selectedTool && (!sameType || !sameLabel)))) {
+        manager.selectTool(tool, true);
       }
     }
 
     if (self.isEmpty) {
-      let selected = self.selected;
+      const selected = self.selected;
 
       labels.unselectAll();
       self.setSelected(!selected);
@@ -181,7 +200,7 @@ const Model = types.model({
     }
 
     if (labels.allowempty && !self.isEmpty) {
-      if (sameObject) {
+      if (applicableRegions.length) {
         labels.findLabel().setSelected(!labels.selectedValues()?.length);
       } else {
         if (self.selected) {
@@ -190,12 +209,14 @@ const Model = types.model({
       }
     }
 
-    if (region && sameObject) {
-      region.setValue(self.parent);
-
-      // hack to trigger RichText re-render the region
-      region.updateSpans?.();
-    }
+    applicableRegions.forEach(region => {
+      if (region) {
+        region.setValue(self.parent);
+        region.notifyDrawingFinished();
+        // hack to trigger RichText re-render the region
+        region.updateSpans?.();
+      }
+    });
   },
 
   setVisible(val) {
@@ -233,7 +254,7 @@ const HtxLabelView = inject("store")(
   observer(({ item, store }) => {
     const hotkey = (store.settings.enableTooltips || store.settings.enableLabelTooltips) && store.settings.enableHotkeys && item.hotkey;
 
-    return (
+    const label = (
       <Label color={item.background} margins empty={item.isEmpty} hotkey={hotkey} hidden={!item.visible} selected={item.selected} onClick={() => {
         item.toggleSelected();
         return false;
@@ -244,6 +265,10 @@ const HtxLabelView = inject("store")(
         )}
       </Label>
     );
+
+    return item.hint
+      ? <Tooltip title={item.hint}>{label}</Tooltip>
+      : label;
   }),
 );
 

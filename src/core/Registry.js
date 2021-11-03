@@ -67,7 +67,7 @@ class _Registry {
 
     if (!available) return [];
     if (value) {
-      for (let model of available) {
+      for (const model of available) {
         if (model.detectByValue && model.detectByValue(value)) return [model];
       }
     }
@@ -84,10 +84,6 @@ class _Registry {
     }
 
     return model;
-  }
-
-  addTool(name, model) {
-    this.tools[name] = model;
   }
 
   /**

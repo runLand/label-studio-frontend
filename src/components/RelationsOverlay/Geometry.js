@@ -141,8 +141,8 @@ export class Geometry {
   }
 
   static modifyBBoxCoords(bbox, modifier = x=>x) {
-    let p1 = modifier([bbox.x, bbox.y]);
-    let p2 = modifier([bbox.width + bbox.x, bbox.height + bbox.y]);
+    const p1 = modifier([bbox.x, bbox.y]);
+    const p2 = modifier([bbox.width + bbox.x, bbox.height + bbox.y]);
 
     return {
       ...bbox,
@@ -273,12 +273,12 @@ export class Geometry {
    */
   static getImageDataBBox(imageData, w, h) {
     if (imageData.length !== w * h * 4) return null;
-    let min = { x: w, y: h },
+    const min = { x: w, y: h },
       max = { x: 0, y: 0 };
 
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        let alphaIndex = 4 * (y * w + x) + 3;
+        const alphaIndex = 4 * (y * w + x) + 3;
 
         if (imageData[alphaIndex]) {
           if (min.x > x) min.x = x;
@@ -288,7 +288,7 @@ export class Geometry {
         }
       }
     }
-    return { x: min.x, y: min.y, width: max.x - min.x, height: max.y - min.y };
+    return min.x <= max.x && min.y <= max.y ? { x: min.x, y: min.y, width: max.x - min.x, height: max.y - min.y } : null;
   }
   /**
    * Combine two or more BBoxes into one
@@ -312,8 +312,8 @@ export class Geometry {
   }
 
   static clampBBox(bbox, min, max) {
-    let p1 = [clamp(bbox.x, min.x, max.x), clamp(bbox.y, min.y, max.y)];
-    let p2 = [clamp(bbox.width + bbox.x, min.x, max.x), clamp(bbox.height + bbox.y, min.y, max.y)];
+    const p1 = [clamp(bbox.x, min.x, max.x), clamp(bbox.y, min.y, max.y)];
+    const p2 = [clamp(bbox.width + bbox.x, min.x, max.x), clamp(bbox.height + bbox.y, min.y, max.y)];
 
     return {
       x: p1[0],

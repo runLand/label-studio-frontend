@@ -58,7 +58,7 @@ const Prediction = observer(({ item, store }) => {
                   const c = cs.addAnnotationFromPrediction(p);
 
                   // this is here because otherwise React doesn't re-render the change in the tree
-                  window.setTimeout(function () {
+                  window.setTimeout(function() {
                     store.annotationStore.selectAnnotation(c.id);
                   }, 50);
                 }}
@@ -79,11 +79,11 @@ const Prediction = observer(({ item, store }) => {
 });
 
 class Predictions extends Component {
-  render () {
+  render() {
     const { store } = this.props;
     const { predictions } = store.annotationStore;
 
-    let title = (
+    const title = (
       <div className={styles.title + " " + styles.titlespace}>
         <h3>Predictions</h3>
         {/* @todo fix View All mode */}

@@ -1,4 +1,4 @@
-import { types, destroy } from "mobx-state-tree";
+import { destroy, types } from "mobx-state-tree";
 import { guidGenerator } from "../core/Helpers";
 import Result from "../regions/Result";
 import { defaultStyle } from "../core/Constants";
@@ -33,7 +33,15 @@ export const AreaMixin = types
     },
 
     hasLabel(value) {
-      return self.labeling?.mainValue?.includes(value);
+      const labels = self.labeling?.mainValue;
+
+      if (!labels) return false;
+      // label can contain comma, so check for full match first
+      if (labels.includes(value)) return true;
+      if (value.includes(",")) {
+        return value.split(",").some(v => labels.includes(v));
+      }
+      return false;
     },
 
     get perRegionTags() {
@@ -50,6 +58,10 @@ export const AreaMixin = types
 
     get labelName() {
       return self.labeling?.mainValue?.[0] || self.emptyLabel?._value;
+    },
+
+    get labels() {
+      return Array.from(self.labeling?.mainValue ?? []);
     },
 
     getLabelText(joinstr) {
@@ -85,6 +97,14 @@ export const AreaMixin = types
 
     getOneColor() {
       return (self.style || defaultStyle).fillcolor;
+    },
+
+    get highlighted() {
+      return self.parent?.selectionArea?.isActive ? self.isInSelectionArea : self._highlighted;
+    },
+
+    get isInSelectionArea() {
+      return self.parent?.selectionArea?.isActive ? self.parent.selectionArea.intersectsBbox(self.bboxCoords) : false;
     },
   }))
   .volatile(() => ({
