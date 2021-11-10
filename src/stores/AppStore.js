@@ -237,11 +237,13 @@ export default types
       /**
        * Hotkey for submit
        */
-      if (self.hasInterface("submit", "update")) {
+      if (self.hasInterface("submit", "update", "review")) {
         hotkeys.addNamed("annotation:submit", () => {
           const entity = self.annotationStore.selected;
 
-          if (!isDefined(entity.pk) && self.hasInterface("submit")) {
+          if (self.hasInterface("review")) {
+            self.acceptAnnotation();
+          } else if (!isDefined(entity.pk) && self.hasInterface("submit")) {
             self.submitAnnotation();
           } else if (self.hasInterface("update")) {
             self.updateAnnotation();
@@ -252,8 +254,14 @@ export default types
       /**
        * Hotkey for skip task
        */
-      if (self.hasInterface("skip")) {
-        hotkeys.addNamed("annotation:skip", self.skipTask);
+      if (self.hasInterface("skip", "review")) {
+        hotkeys.addNamed("annotation:skip", () => {
+          if (self.hasInterface("review")){
+            self.rejectAnnotation();
+          } else {
+            self.skipTask();
+          }
+        });
       }
 
       /**
@@ -448,7 +456,7 @@ export default types
     }
 
     function acceptAnnotation() {
-      handleSubmittingFlag(() => {
+      handleSubmittingFlag(async () => {
         const entity = self.annotationStore.selected;
 
         entity.beforeSend();
@@ -457,12 +465,12 @@ export default types
         const isDirty = entity.history.canUndo;
 
         entity.dropDraft();
-        getEnv(self).events.invoke('acceptAnnotation', self, { isDirty, entity });
-      }, "Error during skip, try again");
+        await getEnv(self).events.invoke('acceptAnnotation', self, { isDirty, entity });
+      }, "Error during accept, try again");
     }
 
     function rejectAnnotation() {
-      handleSubmittingFlag(() => {
+      handleSubmittingFlag(async () => {
         const entity = self.annotationStore.selected;
 
         entity.beforeSend();
@@ -471,8 +479,8 @@ export default types
         const isDirty = entity.history.canUndo;
 
         entity.dropDraft();
-        getEnv(self).events.invoke('rejectAnnotation', self, { isDirty, entity });
-      }, "Error during skip, try again");
+        await getEnv(self).events.invoke('rejectAnnotation', self, { isDirty, entity });
+      }, "Error during reject, try again");
     }
 
     /**
@@ -557,7 +565,7 @@ export default types
 
         const result = item.previous_annotation_history_result ?? [];
 
-        obj.deserializeResults(result);
+        obj.deserializeResults(result, { hidden: true });
       });
     }
 
@@ -602,7 +610,6 @@ export default types
     }
 
     function prevTask() {
-      console.log(self.canGoPrevTask, self.taskHistory, self.task.id);
       if (self.canGoPrevTask) {
         const { taskId, annotationId } = self.taskHistory[self.taskHistory.findIndex((x) => x.taskId === self.task.id) - 1];
 

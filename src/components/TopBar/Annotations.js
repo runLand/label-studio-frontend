@@ -5,6 +5,7 @@ import { Space } from "../../common/Space/Space";
 import { Userpic } from "../../common/Userpic/Userpic";
 import { Block, Elem } from "../../utils/bem";
 import { isDefined, userDisplayName } from "../../utils/utilities";
+import { GroundTruth } from "../CurrentEntity/GroundTruth";
 import "./Annotations.styl";
 
 export const Annotations = observer(({ store, annotationStore }) => {
@@ -13,12 +14,13 @@ export const Annotations = observer(({ store, annotationStore }) => {
   const enableAnnotations = store.hasInterface('annotations:tabs');
   const enablePredictions = store.hasInterface('predictions:tabs');
   const enableCreateAnnotation = store.hasInterface('annotations:add-new');
+  const groundTrurhEnabled = store.hasInterface('ground-truth');
 
   const entities = [];
 
-  if (enableAnnotations) entities.push(...annotationStore.predictions);
+  if (enablePredictions) entities.push(...annotationStore.predictions);
 
-  if (enablePredictions) entities.push(...annotationStore.annotations);
+  if (enableAnnotations) entities.push(...annotationStore.annotations);
 
   const onAnnotationSelect = useCallback((entity, isPrediction) => {
     if (!entity.selected) {
@@ -35,7 +37,7 @@ export const Annotations = observer(({ store, annotationStore }) => {
       const target = e.target;
       const dropdown = dropdownRef.current;
 
-      if (target !== dropdown && !dropdown.contains(target)) {
+      if (target !== dropdown && !dropdown?.contains(target)) {
         setOpened(false);
       }
     };
@@ -57,7 +59,7 @@ export const Annotations = observer(({ store, annotationStore }) => {
               setOpened(!opened);
             }}
             extra={entities.length > 0 ? (
-              <Space size="none" style={{ marginRight: -8 }}>
+              <Space size="none" style={{ marginRight: -8, marginLeft: 8 }}>
                 <Elem name="counter">
                   {entities.indexOf(annotationStore.selected) + 1}/{entities.length}
                 </Elem>
@@ -88,6 +90,9 @@ export const Annotations = observer(({ store, annotationStore }) => {
                   setOpened(false);
                   onAnnotationSelect?.(ent, ent.type === 'prediction');
                 }}
+                extra={groundTrurhEnabled && (
+                  <GroundTruth entity={ent} disabled/>
+                )}
               />
             ))}
           </Elem>
@@ -137,7 +142,8 @@ const Annotation = observer(({ entity, selected, onClick, extra, ...props }) => 
           >{isPrediction && <LsSparks color="#944BFF" style={{ width: 18, height: 18 }}/>}</Elem>
           <Space direction="vertical" size="none">
             <Elem name="user">
-              <Elem name="name">{username} <span>#{entity.pk ?? entity.id}</span></Elem>
+              <Elem tag="span" name="name">{username}</Elem>
+              <Elem tag="span" name="entity-id">#{entity.pk ?? entity.id}</Elem>
             </Elem>
 
             {isDefined(entity.acceptedState) && (
